@@ -6,7 +6,7 @@ from app.config import SENDFLOW_TOKEN, SENDFLOW_ACCOUNT_ID, SENDFLOW_RELEASE_ID
 from app.database import get_next_product_to_send, mark_as_sent
 from app.logger import OpLogger
 
-SENDFLOW_URL = "https://sendflow.pro/sendapi/actions/send-image-message"
+SENDFLOW_URL = "https://sendflow.pro/sendapi/actions/send-text-message"
 
 
 # ── Parsing de preço (para exibição) ───────────────────────
@@ -57,24 +57,26 @@ def format_message(product: dict) -> str:
 
 # ── Envio via SendFlow ─────────────────────────────────────
 
-def send_image_message(caption: str, image_url: str,
-                       log: OpLogger, product_id: str = None) -> bool:
-    headers = {"Authorization": f"Bearer {SENDFLOW_TOKEN}"}
+def send_text_message(message: str, log: OpLogger,
+                      product_id: str = None) -> bool:
+    headers = {
+        "Authorization": f"Bearer {SENDFLOW_TOKEN}",
+        "Content-Type": "application/json",
+    }
     payload = {
-        "accountId": SENDFLOW_ACCOUNT_ID,
+        "linkPreview": True,
+        "messageText": message,
         "releaseId": SENDFLOW_RELEASE_ID,
-        "caption": caption,
-        "url": image_url,
+        "accountId": SENDFLOW_ACCOUNT_ID,
     }
 
     with log.timed() as t:
         try:
             resp = requests.post(SENDFLOW_URL, headers=headers,
-                                 data=payload, timeout=30)
+                                 json=payload, timeout=30)
         except requests.RequestException as e:
             log.error("send", f"Request SendFlow falhou: {e}",
-                      product_id=product_id, exc=e,
-                      image_url=image_url)
+                      product_id=product_id, exc=e)
             return False
 
     if resp.status_code >= 400:
@@ -107,7 +109,6 @@ def run_send_whatsapp():
         return
 
     pid = product["id_produto"]
-    image_url = product.get("Imagem_Produtos", "")
 
     log.info("fetch", f"Produto selecionado: {product.get('Nomes_Produtos', '')[:60]}",
              product_id=pid,
@@ -120,7 +121,7 @@ def run_send_whatsapp():
              product_id=pid, caption_length=len(caption))
 
     # ── Enviar ─────────────────────────────────────────────
-    if not send_image_message(caption, image_url, log, product_id=pid):
+    if not send_text_message(caption, log, product_id=pid):
         log.error("done", "Envio falhou — produto NÃO marcado como enviado",
                   product_id=pid)
         return
