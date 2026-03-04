@@ -7,7 +7,7 @@ from apscheduler.triggers.cron import CronTrigger
 from app.config import TZ, PORT
 from app.scraper import run_scraping
 from app.affiliate import run_affiliate_generation, run_retry_null_links
-from app.whatsapp import run_send_whatsapp
+from app.whatsapp import run_send_whatsapp, send_alert
 from app.database import cleanup_old_products, cleanup_null_links, query_logs
 from app.logger import OpLogger, flush_logs, cleanup_old_logs
 
@@ -146,6 +146,13 @@ def trigger_affiliate():
 def trigger_whatsapp():
     scheduler.add_job(run_send_whatsapp, id="manual_whatsapp", replace_existing=True)
     return {"status": "triggered", "job": "whatsapp"}
+
+
+@app.post("/trigger/alert")
+def trigger_alert():
+    """Envia um alerta de teste para a campanha admin."""
+    send_alert("🔔 Teste de alerta — sistema de monitoramento funcionando.")
+    return {"status": "sent", "job": "alert_test"}
 
 
 @app.post("/trigger/full")
