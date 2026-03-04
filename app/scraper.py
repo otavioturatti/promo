@@ -6,6 +6,7 @@ from bs4 import BeautifulSoup
 
 from app.database import get_active_categories, upsert_products_batch
 from app.logger import OpLogger
+from app.whatsapp import send_alert
 
 HEADERS = {
     "User-Agent": (
@@ -146,9 +147,17 @@ def scrape_category(url: str, log: OpLogger) -> list[dict]:
     return products
 
 
+# ── Contador de falhas consecutivas ────────────────────────
+
+_consecutive_empty = 0
+_ALERT_AFTER = 3  # alerta após 3 rodadas sem produtos
+
+
 # ── Job principal ──────────────────────────────────────────
 
 def run_scraping():
+    global _consecutive_empty
+
     log = OpLogger("scraper")
     log.info("start", "Iniciando scraping de categorias")
 
@@ -157,10 +166,12 @@ def run_scraping():
         categories = get_active_categories()
     except Exception as e:
         log.error("categories", "Falha ao buscar categorias no banco", exc=e)
+        _check_alert(log, "Falha ao buscar categorias no banco de dados.")
         return
 
     if not categories:
         log.warning("categories", "Nenhuma categoria ativa encontrada")
+        _check_alert(log, "Nenhuma categoria ativa encontrada no banco.")
         return
 
     log.info("categories", f"{len(categories)} categorias ativas",
@@ -196,7 +207,18 @@ def run_scraping():
     # ── Salvar no banco ────────────────────────────────────
     if not all_products:
         log.warning("save", "Nenhum produto para salvar")
+        _consecutive_empty += 1
+        log.warning("monitor", f"Rodadas consecutivas sem produtos: {_consecutive_empty}/{_ALERT_AFTER}",
+                    consecutive=_consecutive_empty)
+        if _consecutive_empty >= _ALERT_AFTER:
+            _check_alert(log,
+                f"Scraping zerou por {_consecutive_empty} rodadas seguidas. "
+                f"O Mercado Livre pode ter mudado o HTML. "
+                f"Categorias: {cat_ok} OK, {cat_fail} sem produtos.")
         return
+
+    # Reset contador em caso de sucesso
+    _consecutive_empty = 0
 
     random.shuffle(all_products)
 
@@ -209,3 +231,9 @@ def run_scraping():
     log.info("done", f"Scraping finalizado: {saved} produtos salvos",
              duration_ms=t_total.ms, total_products=saved,
              categories=len(categories))
+
+
+def _check_alert(log: OpLogger, message: str):
+    """Envia alerta crítico via WhatsApp."""
+    log.error("alert", f"ALERTA CRÍTICO: {message}")
+    send_alert(f"⚠️ ALERTA BOT PROMO ⚠️\n\n{message}\n\nVerifique os logs em /logs?level=ERROR")

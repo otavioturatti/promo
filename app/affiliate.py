@@ -9,6 +9,7 @@ from app.database import (
     update_affiliate_link,
 )
 from app.logger import OpLogger
+from app.whatsapp import send_alert
 
 ML_API_URL = "https://www.mercadolivre.com.br/affiliate-program/api/v2/affiliates/createLink"
 
@@ -98,6 +99,16 @@ def _process_products(products: list[dict], log: OpLogger):
 
     log.info("done", f"Concluído: {success} OK, {failed} falhas de {total}",
              total=total, success=success, failed=failed)
+
+    # Se todos falharam, provavelmente cookies expiraram
+    if total > 0 and success == 0:
+        log.error("alert", "Todos os links falharam — cookies podem ter expirado")
+        send_alert(
+            "⚠️ ALERTA BOT PROMO ⚠️\n\n"
+            f"Geração de links falhou em todos os {total} produtos.\n"
+            "Os cookies do Mercado Livre provavelmente expiraram.\n\n"
+            "Atualize ML_COOKIES e ML_CSRF_TOKEN no EasyPanel."
+        )
 
 
 def run_affiliate_generation():

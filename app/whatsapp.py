@@ -2,7 +2,10 @@ import re
 
 import requests
 
-from app.config import SENDFLOW_TOKEN, SENDFLOW_ACCOUNT_ID, SENDFLOW_RELEASE_ID
+from app.config import (
+    SENDFLOW_TOKEN, SENDFLOW_ACCOUNT_ID,
+    SENDFLOW_RELEASE_ID, SENDFLOW_ALERT_RELEASE_ID,
+)
 from app.database import get_next_product_to_send, mark_as_sent
 from app.logger import OpLogger
 
@@ -69,6 +72,33 @@ def send_text_message(message: str, log: OpLogger,
              product_id=product_id, duration_ms=t.ms,
              status=resp.status_code)
     return True
+
+
+# ── Alerta para admin ──────────────────────────────────────
+
+def send_alert(message: str):
+    """Envia alerta para a campanha de admin via SendFlow."""
+    log = OpLogger("alert")
+    headers = {
+        "Authorization": f"Bearer {SENDFLOW_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "linkPreview": False,
+        "messageText": message,
+        "releaseId": SENDFLOW_ALERT_RELEASE_ID,
+        "accountId": SENDFLOW_ACCOUNT_ID,
+    }
+
+    try:
+        resp = requests.post(SENDFLOW_URL, headers=headers,
+                             json=payload, timeout=30)
+        if resp.status_code < 400:
+            log.info("send", f"Alerta enviado → {resp.status_code}")
+        else:
+            log.error("send", f"Falha ao enviar alerta → {resp.status_code}: {resp.text[:200]}")
+    except requests.RequestException as e:
+        log.error("send", f"Request falhou: {e}", exc=e)
 
 
 # ── Job principal ──────────────────────────────────────────
