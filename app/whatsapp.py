@@ -9,47 +9,27 @@ from app.logger import OpLogger
 SENDFLOW_URL = "https://sendflow.pro/sendapi/actions/send-text-message"
 
 
-# ── Parsing de preço (para exibição) ───────────────────────
-
-def parse_price_for_display(raw: str) -> dict:
-    result = {"original": "", "desconto": "", "pct": ""}
-    if not raw:
-        return result
-
-    parts = re.split(r"\\n|\n", raw)
-    if len(parts) < 2:
-        return result
-
-    result["original"] = parts[0].strip()
-    linha = parts[1].strip()
-
-    match = re.search(r"R\$\s*([^%]+)%", linha)
-    if not match:
-        return result
-
-    bloco = match.group(1).strip()
-    preco_match = re.match(r"^(.+?,\d{2})(\d+)$", bloco)
-    if preco_match:
-        result["desconto"] = "R$" + preco_match.group(1)
-        result["pct"] = preco_match.group(2)
-
-    return result
-
-
 # ── Formata mensagem ───────────────────────────────────────
 
 def format_message(product: dict) -> str:
+    """
+    Formato do campo Preco no banco (novo):
+        R$2.499,90
+        R$1.484,00
+        40% OFF
+    """
     nome = product.get("Nomes_Produtos", "")
     preco_raw = product.get("Preco", "")
     link = product.get("Link_de_afiliado", "")
 
-    price = parse_price_for_display(preco_raw)
-    original = price["original"].replace("R$", "").strip()
-    desconto = price["desconto"].replace("R$", "").strip()
-    pct = price["pct"]
+    parts = re.split(r"\\n|\n", preco_raw)
+
+    original = parts[0].strip() if len(parts) > 0 else ""
+    desconto = parts[1].strip() if len(parts) > 1 else ""
+    pct = parts[2].strip().replace(" OFF", "") if len(parts) > 2 else ""
 
     msg = f"{nome}\n\n"
-    msg += f"De: R${original} Por: R${desconto} ({pct}% OFF)"
+    msg += f"De: {original} Por: {desconto} ({pct} OFF)"
     msg += f"\n\n{link}\nGARANTA O SEU AQUI"
 
     return msg

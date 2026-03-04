@@ -17,32 +17,46 @@ HEADERS = {
 }
 
 
-# ── Parsing de preço ────────────────────────────────────────
+# ── Parsing de preço via aria-label ─────────────────────────
 
-def parse_price(raw: str) -> dict | None:
-    if not raw:
+def _aria_to_brl(label: str) -> str:
+    """Converte aria-label tipo 'Antes: 2499 reais com 90 centavos' → 'R$2.499,90'."""
+    m = re.search(r"(\d+)\s*reais(?:\s+com\s+(\d+)\s+centavos)?", label)
+    if not m:
+        return ""
+    inteiro = int(m.group(1))
+    centavos = m.group(2)
+    if centavos:
+        return f"R${inteiro:,},{centavos}".replace(",", ".")
+    return f"R${inteiro:,}".replace(",", ".")
+
+
+def parse_price_element(price_el) -> dict | None:
+    """Extrai preço original, com desconto e % OFF de um elemento de preço."""
+    html_str = str(price_el)
+
+    # Busca aria-labels com "Antes:" e "Agora:"
+    antes_m = re.search(r'aria-label="(Antes:\s*\d+\s*reais[^"]*)"', html_str)
+    agora_m = re.search(r'aria-label="(Agora:\s*\d+\s*reais[^"]*)"', html_str)
+
+    if not antes_m or not agora_m:
         return None
 
-    parts = re.split(r"\\n|\n", raw)
-    if len(parts) < 2:
+    original = _aria_to_brl(antes_m.group(1))
+    desconto_valor = _aria_to_brl(agora_m.group(1))
+
+    if not original or not desconto_valor:
         return None
 
-    preco_original = parts[0].strip()
-    linha_suja = parts[1].strip()
-
-    match = re.search(r"R\$\s*([^%]+)%", linha_suja)
-    if not match:
-        return None
-
-    bloco = match.group(1).strip()
-    preco_match = re.match(r"^(.+?,\d{2})(\d+)$", bloco)
-    if not preco_match:
+    # Busca porcentagem de desconto no texto (ex: "40% OFF")
+    off_m = re.search(r"(\d+)%\s*OFF", html_str)
+    if not off_m:
         return None
 
     return {
-        "original": preco_original,
-        "desconto_valor": "R$" + preco_match.group(1),
-        "desconto_pct": int(preco_match.group(2)),
+        "original": original,
+        "desconto_valor": desconto_valor,
+        "desconto_pct": int(off_m.group(1)),
     }
 
 
@@ -78,25 +92,19 @@ def scrape_category(url: str, log: OpLogger) -> list[dict]:
     names = [el.get_text(strip=True) for el in soup.select(".poly-card__content > h3 > a")]
     images = [el.get("src", "") for el in soup.select("img.poly-component__picture")]
     links = [el.get("href", "") for el in soup.select(".poly-card__content > h3 > a")]
-
-    prices = []
-    for price_el in soup.select("div.poly-card__content > div.poly-component__price"):
-        clone = BeautifulSoup(str(price_el), "html.parser")
-        for skip in clone.select(".andes-money-amount_discount"):
-            skip.decompose()
-        prices.append(clone.get_text(separator="\n", strip=True))
+    price_els = soup.select("div.poly-card__content > div.poly-component__price")
 
     log.info("parse", f"Elementos: {len(names)} nomes, {len(images)} imgs, "
-             f"{len(prices)} preços, {len(links)} links",
+             f"{len(price_els)} preços, {len(links)} links",
              names=len(names), images=len(images),
-             prices=len(prices), links=len(links))
+             prices=len(price_els), links=len(links))
 
     # ── Montar produtos ────────────────────────────────────
     products = []
     skipped = {"empty": 0, "click1": 0, "price_parse": 0, "low_discount": 0, "no_id": 0}
 
-    for name, image, price_raw, link in zip(names, images, prices, links):
-        if not all([name, image, price_raw, link]):
+    for name, image, price_el, link in zip(names, images, price_els, links):
+        if not all([name, image, link]):
             skipped["empty"] += 1
             continue
 
@@ -104,7 +112,7 @@ def scrape_category(url: str, log: OpLogger) -> list[dict]:
             skipped["click1"] += 1
             continue
 
-        price = parse_price(price_raw)
+        price = parse_price_element(price_el)
         if not price:
             skipped["price_parse"] += 1
             continue
@@ -118,10 +126,15 @@ def scrape_category(url: str, log: OpLogger) -> list[dict]:
             skipped["no_id"] += 1
             continue
 
+        # Salva preço já formatado para exibição no WhatsApp
+        preco_formatado = (
+            f"{price['original']}\n{price['desconto_valor']}\n{price['desconto_pct']}% OFF"
+        )
+
         products.append({
             "nome": name,
             "imagem": image,
-            "preco": price_raw,
+            "preco": preco_formatado,
             "link": link,
             "id_produto": id_produto,
         })
