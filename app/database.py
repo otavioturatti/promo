@@ -120,12 +120,17 @@ def get_ready_with_null_links() -> list[dict]:
 def get_next_product_to_send() -> dict | None:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            # Sorteia 1 entre os 20 mais recentes prontos
             cur.execute("""
-                SELECT * FROM "Produtos"
-                WHERE "Status" = 'PRONTO'
-                  AND "Link_de_afiliado" IS NOT NULL
-                  AND "Link_de_afiliado" != ''
-                ORDER BY "created_at" DESC
+                SELECT * FROM (
+                    SELECT * FROM "Produtos"
+                    WHERE "Status" = 'PRONTO'
+                      AND "Link_de_afiliado" IS NOT NULL
+                      AND "Link_de_afiliado" != ''
+                    ORDER BY "created_at" DESC
+                    LIMIT 20
+                ) recentes
+                ORDER BY RANDOM()
                 LIMIT 1
             """)
             return cur.fetchone()
