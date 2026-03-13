@@ -67,10 +67,10 @@ def setup_jobs():
         replace_existing=True,
     )
 
-    # Envio WhatsApp: a cada 17 min das 6h às 22h
+    # Envio WhatsApp: a cada 7 min das 6h às 22h
     scheduler.add_job(
         run_send_whatsapp,
-        CronTrigger(minute="*/17", hour="6-22", timezone=TZ),
+        CronTrigger(minute="*/7", hour="6-22", timezone=TZ),
         id="whatsapp",
         replace_existing=True,
     )
