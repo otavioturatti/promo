@@ -4,8 +4,10 @@ import requests
 
 from app.config import ML_COOKIES, ML_CSRF_TOKEN, ML_AFFILIATE_TAG
 from app.database import (
+    count_affiliate_failures,
     get_pending_products,
     get_ready_with_null_links,
+    mark_as_failed,
     update_affiliate_link,
 )
 from app.logger import OpLogger
@@ -52,17 +54,20 @@ def create_affiliate_link(product_url: str, log: OpLogger,
 
     try:
         data = resp.json()
-        short_url = data["urls"][0]["short_url"]
+        url_obj = data["urls"][0]
+        affiliate_url = url_obj.get("short_url") or url_obj.get("origin_url")
+        if not affiliate_url:
+            raise KeyError("sem short_url nem origin_url na resposta")
     except (KeyError, IndexError, ValueError) as e:
         log.error("create_link", f"Resposta inesperada da API: {e}",
                   product_id=product_id, duration_ms=t.ms, exc=e,
                   response_body=resp.text[:300])
         return None
 
-    log.info("create_link", f"Link gerado → {short_url}",
+    log.info("create_link", f"Link gerado → {affiliate_url}",
              product_id=product_id, duration_ms=t.ms,
-             affiliate_url=short_url)
-    return short_url
+             affiliate_url=affiliate_url)
+    return affiliate_url
 
 
 def _process_products(products: list[dict], log: OpLogger):
@@ -94,6 +99,16 @@ def _process_products(products: list[dict], log: OpLogger):
                 failed += 1
         else:
             failed += 1
+            try:
+                failures = count_affiliate_failures(pid)
+                if failures >= 3:
+                    mark_as_failed(pid)
+                    log.warning("permanent_fail",
+                                f"Produto marcado como FALHA após {failures} tentativas",
+                                product_id=pid)
+            except Exception as e:
+                log.error("check_failures", f"Erro ao verificar falhas: {e}",
+                          product_id=pid, exc=e)
 
         time.sleep(3)
 

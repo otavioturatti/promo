@@ -93,6 +93,29 @@ def mark_as_sent(id_produto: str):
             """, (id_produto,))
 
 
+def mark_as_failed(id_produto: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE "Produtos"
+                SET "Status" = 'FALHA'
+                WHERE "id_produto" = %s
+            """, (id_produto,))
+
+
+def count_affiliate_failures(id_produto: str) -> int:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT COUNT(*) FROM logs
+                WHERE product_id = %s
+                  AND module = 'affiliate'
+                  AND stage = 'create_link'
+                  AND level = 'ERROR'
+            """, (id_produto,))
+            return cur.fetchone()[0]
+
+
 # ── Produtos — Leitura ──────────────────────────────────────
 
 def get_pending_products() -> list[dict]:
