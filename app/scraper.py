@@ -4,6 +4,7 @@ import random
 import requests
 from bs4 import BeautifulSoup
 
+from app.config import Niche
 from app.database import get_active_categories, upsert_products_batch
 from app.logger import OpLogger
 from app.whatsapp import send_alert
@@ -147,35 +148,41 @@ def scrape_category(url: str, log: OpLogger) -> list[dict]:
     return products
 
 
-# ── Contador de falhas consecutivas ────────────────────────
+# ── Contador de rodadas vazias (por nicho) ─────────────────
 
-_consecutive_empty = 0
+_consecutive_empty: dict[str, int] = {}
 _ALERT_AFTER = 3  # alerta após 3 rodadas sem produtos
+
+
+def _register_empty_round(niche_key: str) -> int:
+    _consecutive_empty[niche_key] = _consecutive_empty.get(niche_key, 0) + 1
+    return _consecutive_empty[niche_key]
+
+
+def _register_success(niche_key: str) -> None:
+    _consecutive_empty[niche_key] = 0
 
 
 # ── Job principal ──────────────────────────────────────────
 
-def run_scraping():
-    global _consecutive_empty
-
-    log = OpLogger("scraper")
-    log.info("start", "Iniciando scraping de categorias")
+def run_scraping(niche: Niche):
+    log = OpLogger("scraper", niche)
+    log.info("start", f"Iniciando scraping [{niche.key}]")
 
     # ── Buscar categorias ──────────────────────────────────
     try:
-        categories = get_active_categories()
+        categories = get_active_categories(niche)
     except Exception as e:
         log.error("categories", "Falha ao buscar categorias no banco", exc=e)
-        _check_alert(log, "Falha ao buscar categorias no banco de dados.")
+        _check_alert(log, niche, "Falha ao buscar categorias no banco de dados.")
         return
 
     if not categories:
         log.warning("categories", "Nenhuma categoria ativa encontrada")
-        _check_alert(log, "Nenhuma categoria ativa encontrada no banco.")
+        _check_alert(log, niche, "Nenhuma categoria ativa encontrada no banco.")
         return
 
-    log.info("categories", f"{len(categories)} categorias ativas",
-             count=len(categories))
+    log.info("categories", f"{len(categories)} categorias ativas", count=len(categories))
 
     # ── Scraping por categoria ─────────────────────────────
     all_products = []
@@ -207,33 +214,32 @@ def run_scraping():
     # ── Salvar no banco ────────────────────────────────────
     if not all_products:
         log.warning("save", "Nenhum produto para salvar")
-        _consecutive_empty += 1
-        log.warning("monitor", f"Rodadas consecutivas sem produtos: {_consecutive_empty}/{_ALERT_AFTER}",
-                    consecutive=_consecutive_empty)
-        if _consecutive_empty >= _ALERT_AFTER:
-            _check_alert(log,
-                f"Scraping zerou por {_consecutive_empty} rodadas seguidas. "
+        empty = _register_empty_round(niche.key)
+        log.warning("monitor", f"Rodadas consecutivas sem produtos: {empty}/{_ALERT_AFTER}",
+                    consecutive=empty)
+        if empty >= _ALERT_AFTER:
+            _check_alert(log, niche,
+                f"Scraping zerou por {empty} rodadas seguidas. "
                 f"O Mercado Livre pode ter mudado o HTML. "
                 f"Categorias: {cat_ok} OK, {cat_fail} sem produtos.")
         return
 
-    # Reset contador em caso de sucesso
-    _consecutive_empty = 0
+    _register_success(niche.key)
 
     random.shuffle(all_products)
 
     with log.timed() as t_save:
-        saved, errors = upsert_products_batch(all_products)
+        saved, errors = upsert_products_batch(all_products, niche)
 
     log.info("save", f"{saved} salvos, {errors} erros",
              duration_ms=t_save.ms, saved=saved, errors=errors)
 
     log.info("done", f"Scraping finalizado: {saved} produtos salvos",
-             duration_ms=t_total.ms, total_products=saved,
-             categories=len(categories))
+             duration_ms=t_total.ms, total_products=saved, categories=len(categories))
 
 
-def _check_alert(log: OpLogger, message: str):
-    """Envia alerta crítico via WhatsApp."""
-    log.error("alert", f"ALERTA CRÍTICO: {message}")
-    send_alert(f"⚠️ ALERTA BOT PROMO ⚠️\n\n{message}\n\nVerifique os logs em /logs?level=ERROR")
+def _check_alert(log: OpLogger, niche: Niche, message: str):
+    """Envia alerta crítico via WhatsApp (campanha admin)."""
+    log.error("alert", f"ALERTA CRÍTICO [{niche.key}]: {message}")
+    send_alert(f"⚠️ ALERTA BOT PROMO [{niche.key.upper()}] ⚠️\n\n{message}\n\n"
+               f"Verifique os logs em /logs?level=ERROR&niche={niche.key}")
