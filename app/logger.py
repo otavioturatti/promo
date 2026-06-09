@@ -136,9 +136,10 @@ def cleanup_old_logs():
         with conn:
             with conn.cursor() as cur:
                 for niche in NICHES:
-                    query = sql.SQL("DELETE FROM {} WHERE created_at < NOW() - INTERVAL '15 days'") \
-                               .format(sql.Identifier(niche.table_logs))
-                    cur.execute(str(query))
+                    cur.execute(
+                        sql.SQL("DELETE FROM {} WHERE created_at < NOW() - INTERVAL '15 days'")
+                           .format(sql.Identifier(niche.table_logs))
+                    )
                     total += cur.rowcount
         _console.info("[LOG-DB] Limpeza: %d logs com +15 dias removidos", total)
         return total

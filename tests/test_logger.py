@@ -60,6 +60,6 @@ def test_cleanup_old_logs_apaga_de_todas_as_tabelas(monkeypatch):
 
     monkeypatch.setattr(logger.psycopg2, "connect", lambda *a, **k: _Conn())
     logger.cleanup_old_logs()
-    blob = " ".join(deletes)
+    blob = " ".join(str(q) for q in deletes)
     assert "logs_carros" in blob
     assert "logs" in blob
