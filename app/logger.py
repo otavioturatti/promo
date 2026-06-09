@@ -23,8 +23,9 @@ from contextlib import contextmanager
 
 import psycopg2
 import psycopg2.extras
+from psycopg2 import sql
 
-from app.config import DATABASE_URL
+from app.config import DATABASE_URL, Niche, NICHES, NICHE_BY_KEY
 
 # ── Console logger ──────────────────────────────────────────
 
@@ -48,36 +49,39 @@ _FLUSH_INTERVAL = 5
 _BATCH_SIZE = 100
 
 
+def _group_by_table(records: list[dict]) -> dict:
+    groups = {}
+    for r in records:
+        groups.setdefault(r["log_table"], []).append(r)
+    return groups
+
+
 def _flush_to_db(records: list[dict]):
     conn = None
     try:
         conn = psycopg2.connect(DATABASE_URL)
         with conn:
             with conn.cursor() as cur:
-                psycopg2.extras.execute_values(
-                    cur,
-                    """
-                    INSERT INTO logs
-                        (request_id, level, module, stage, product_id,
-                         message, extra, traceback, duration_ms)
-                    VALUES %s
-                    """,
-                    [
-                        (
-                            r["request_id"],
-                            r["level"],
-                            r["module"],
-                            r["stage"],
-                            r.get("product_id"),
-                            r["message"],
-                            r.get("extra"),
-                            r.get("traceback"),
-                            r.get("duration_ms"),
-                        )
-                        for r in records
-                    ],
-                    template="(%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)",
-                )
+                for table, recs in _group_by_table(records).items():
+                    table_ident = sql.Identifier(table).as_string(conn)
+                    psycopg2.extras.execute_values(
+                        cur,
+                        f"""
+                        INSERT INTO {table_ident}
+                            (request_id, level, module, stage, product_id,
+                             message, extra, traceback, duration_ms)
+                        VALUES %s
+                        """,
+                        [
+                            (
+                                r["request_id"], r["level"], r["module"], r["stage"],
+                                r.get("product_id"), r["message"], r.get("extra"),
+                                r.get("traceback"), r.get("duration_ms"),
+                            )
+                            for r in recs
+                        ],
+                        template="(%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)",
+                    )
     except Exception as e:
         _console.error("[LOG-DB] Falha ao persistir %d logs: %s", len(records), e)
     finally:
@@ -126,14 +130,18 @@ def flush_logs():
 
 def cleanup_old_logs():
     conn = None
+    total = 0
     try:
         conn = psycopg2.connect(DATABASE_URL)
         with conn:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM logs WHERE created_at < NOW() - INTERVAL '15 days'")
-                deleted = cur.rowcount
-        _console.info("[LOG-DB] Limpeza: %d logs com +15 dias removidos", deleted)
-        return deleted
+                for niche in NICHES:
+                    query = sql.SQL("DELETE FROM {} WHERE created_at < NOW() - INTERVAL '15 days'") \
+                               .format(sql.Identifier(niche.table_logs))
+                    cur.execute(str(query))
+                    total += cur.rowcount
+        _console.info("[LOG-DB] Limpeza: %d logs com +15 dias removidos", total)
+        return total
     except Exception as e:
         _console.error("[LOG-DB] Falha na limpeza de logs: %s", e)
         return 0
@@ -158,8 +166,9 @@ class OpLogger:
         log.error("http", "Timeout", exc=e, url="...")
     """
 
-    def __init__(self, module: str):
+    def __init__(self, module: str, niche: Niche = None):
         self.module = module
+        self.niche = niche or NICHE_BY_KEY["geral"]
         self.request_id = uuid.uuid4().hex[:8]
 
     def info(self, stage: str, msg: str, *, product_id: str = None,
@@ -221,6 +230,7 @@ class OpLogger:
                 "extra": extra_json,
                 "traceback": traceback_str,
                 "duration_ms": duration_ms,
+                "log_table": self.niche.table_logs,
             })
         except queue.Full:
             _console.warning("[LOG-DB] Queue cheia — log descartado")
