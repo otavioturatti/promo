@@ -55,14 +55,6 @@ def test_query_logs_usa_tabela_e_filtros(monkeypatch):
     assert params == ["ERROR", 10]
 
 
-def test_default_e_o_nicho_geral(monkeypatch):
-    cur = FakeCursor(fetch_result=[])
-    _patch_conn(monkeypatch, cur)
-    database.get_pending_products()  # sem niche -> geral (compat temporária)
-    query, _ = cur.executed[0]
-    assert identifiers_in(query) == {"Produtos"}
-
-
 def test_upsert_products_batch_usa_tabela_do_nicho(monkeypatch):
     cur = FakeCursor()
     _patch_conn(monkeypatch, cur)

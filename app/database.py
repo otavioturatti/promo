@@ -4,9 +4,7 @@ import psycopg2
 import psycopg2.extras
 from psycopg2 import sql
 
-from app.config import DATABASE_URL, Niche, NICHE_BY_KEY
-
-_GERAL = NICHE_BY_KEY["geral"]  # default temporário — removido na Task 9
+from app.config import DATABASE_URL, Niche
 
 
 @contextmanager
@@ -24,7 +22,7 @@ def get_conn():
 
 # ── Categorias ──────────────────────────────────────────────
 
-def get_active_categories(niche: Niche = _GERAL) -> list[dict]:
+def get_active_categories(niche: Niche) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
@@ -53,7 +51,7 @@ def _upsert_sql(niche: Niche):
     """).format(t=t)
 
 
-def upsert_product(conn, product: dict, niche: Niche = _GERAL) -> bool:
+def upsert_product(conn, product: dict, niche: Niche) -> bool:
     """Insere ou atualiza um produto. Retorna True se afetou alguma row."""
     with conn.cursor() as cur:
         cur.execute(_upsert_sql(niche), {
@@ -66,7 +64,7 @@ def upsert_product(conn, product: dict, niche: Niche = _GERAL) -> bool:
         return cur.rowcount > 0
 
 
-def upsert_products_batch(products: list[dict], niche: Niche = _GERAL) -> tuple[int, int]:
+def upsert_products_batch(products: list[dict], niche: Niche) -> tuple[int, int]:
     """Insere batch. Retorna (salvos, erros)."""
     saved = 0
     errors = 0
@@ -81,7 +79,7 @@ def upsert_products_batch(products: list[dict], niche: Niche = _GERAL) -> tuple[
     return saved, errors
 
 
-def update_affiliate_link(id_produto: str, link: str, niche: Niche = _GERAL):
+def update_affiliate_link(id_produto: str, link: str, niche: Niche):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -92,7 +90,7 @@ def update_affiliate_link(id_produto: str, link: str, niche: Niche = _GERAL):
             )
 
 
-def mark_as_sent(id_produto: str, niche: Niche = _GERAL):
+def mark_as_sent(id_produto: str, niche: Niche):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -102,7 +100,7 @@ def mark_as_sent(id_produto: str, niche: Niche = _GERAL):
             )
 
 
-def mark_as_failed(id_produto: str, niche: Niche = _GERAL):
+def mark_as_failed(id_produto: str, niche: Niche):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -112,7 +110,7 @@ def mark_as_failed(id_produto: str, niche: Niche = _GERAL):
             )
 
 
-def count_affiliate_failures(id_produto: str, niche: Niche = _GERAL) -> int:
+def count_affiliate_failures(id_produto: str, niche: Niche) -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -130,7 +128,7 @@ def count_affiliate_failures(id_produto: str, niche: Niche = _GERAL) -> int:
 
 # ── Produtos — Leitura ──────────────────────────────────────
 
-def get_pending_products(niche: Niche = _GERAL) -> list[dict]:
+def get_pending_products(niche: Niche) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
@@ -141,7 +139,7 @@ def get_pending_products(niche: Niche = _GERAL) -> list[dict]:
             return cur.fetchall()
 
 
-def get_ready_with_null_links(niche: Niche = _GERAL) -> list[dict]:
+def get_ready_with_null_links(niche: Niche) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
@@ -152,7 +150,7 @@ def get_ready_with_null_links(niche: Niche = _GERAL) -> list[dict]:
             return cur.fetchall()
 
 
-def get_next_product_to_send(niche: Niche = _GERAL) -> dict | None:
+def get_next_product_to_send(niche: Niche) -> dict | None:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             # Sorteia 1 entre os 20 mais recentes prontos
@@ -175,7 +173,7 @@ def get_next_product_to_send(niche: Niche = _GERAL) -> dict | None:
 
 # ── Limpeza ─────────────────────────────────────────────────
 
-def cleanup_old_products(niche: Niche = _GERAL) -> int:
+def cleanup_old_products(niche: Niche) -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -185,7 +183,7 @@ def cleanup_old_products(niche: Niche = _GERAL) -> int:
             return cur.rowcount
 
 
-def cleanup_null_links(niche: Niche = _GERAL) -> int:
+def cleanup_null_links(niche: Niche) -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -199,12 +197,12 @@ def cleanup_null_links(niche: Niche = _GERAL) -> int:
 # ── Logs — Leitura (endpoint /logs) ─────────────────────────
 
 def query_logs(
+    niche: Niche,
     limit: int = 50,
     level: str = None,
     module: str = None,
     request_id: str = None,
     product_id: str = None,
-    niche: Niche = _GERAL,
 ) -> list[dict]:
     clauses = []
     params = []
