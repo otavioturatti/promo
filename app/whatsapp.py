@@ -3,8 +3,7 @@ import re
 import requests
 
 from app.config import (
-    SENDFLOW_TOKEN, SENDFLOW_ACCOUNT_ID,
-    SENDFLOW_RELEASE_ID, SENDFLOW_ALERT_RELEASE_ID,
+    SENDFLOW_TOKEN, SENDFLOW_ACCOUNT_ID, SENDFLOW_ALERT_RELEASE_ID, Niche,
 )
 from app.database import get_next_product_to_send, mark_as_sent
 from app.logger import OpLogger
@@ -40,7 +39,7 @@ def format_message(product: dict) -> str:
 
 # ── Envio via SendFlow ─────────────────────────────────────
 
-def send_text_message(message: str, log: OpLogger,
+def send_text_message(message: str, log: OpLogger, release_id: str,
                       product_id: str = None) -> bool:
     headers = {
         "Authorization": f"Bearer {SENDFLOW_TOKEN}",
@@ -49,7 +48,7 @@ def send_text_message(message: str, log: OpLogger,
     payload = {
         "linkPreview": True,
         "messageText": message,
-        "releaseId": SENDFLOW_RELEASE_ID,
+        "releaseId": release_id,
         "accountId": SENDFLOW_ACCOUNT_ID,
     }
 
@@ -103,13 +102,12 @@ def send_alert(message: str):
 
 # ── Job principal ──────────────────────────────────────────
 
-def run_send_whatsapp():
-    log = OpLogger("whatsapp")
-    log.info("start", "Buscando próximo produto para enviar")
+def run_send_whatsapp(niche: Niche):
+    log = OpLogger("whatsapp", niche)
+    log.info("start", f"Buscando próximo produto para enviar [{niche.key}]")
 
-    # ── Buscar produto ─────────────────────────────────────
     try:
-        product = get_next_product_to_send()
+        product = get_next_product_to_send(niche)
     except Exception as e:
         log.error("fetch", "Falha ao buscar produto no banco", exc=e)
         return
@@ -125,24 +123,19 @@ def run_send_whatsapp():
              nome=product.get("Nomes_Produtos", ""),
              link_afiliado=product.get("Link_de_afiliado", ""))
 
-    # ── Formatar mensagem ──────────────────────────────────
     caption = format_message(product)
     log.info("format", f"Mensagem formatada ({len(caption)} chars)",
              product_id=pid, caption_length=len(caption))
 
-    # ── Enviar ─────────────────────────────────────────────
-    if not send_text_message(caption, log, product_id=pid):
-        log.error("done", "Envio falhou — produto NÃO marcado como enviado",
-                  product_id=pid)
+    if not send_text_message(caption, log, niche.sendflow_release_id, product_id=pid):
+        log.error("done", "Envio falhou — produto NÃO marcado como enviado", product_id=pid)
         return
 
-    # ── Marcar como enviado ────────────────────────────────
     try:
-        mark_as_sent(pid)
+        mark_as_sent(pid, niche)
         log.info("mark_sent", "Status → ENVIADO", product_id=pid)
     except Exception as e:
-        log.error("mark_sent", f"Falha ao marcar como enviado: {e}",
-                  product_id=pid, exc=e)
+        log.error("mark_sent", f"Falha ao marcar como enviado: {e}", product_id=pid, exc=e)
         return
 
     log.info("done", "Produto enviado com sucesso", product_id=pid)
