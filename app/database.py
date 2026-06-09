@@ -224,7 +224,9 @@ def query_logs(
 
     query = sql.SQL("SELECT * FROM {} ").format(sql.Identifier(niche.table_logs))
     if clauses:
-        query = query + sql.SQL("WHERE " + " AND ".join(clauses) + " ")
+        query = query + sql.SQL("WHERE ") + sql.SQL(" AND ").join(
+            sql.SQL(c) for c in clauses
+        ) + sql.SQL(" ")
     query = query + sql.SQL("ORDER BY created_at DESC LIMIT %s")
     params.append(min(limit, 500))
 

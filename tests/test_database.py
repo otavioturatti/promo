@@ -60,4 +60,14 @@ def test_default_e_o_nicho_geral(monkeypatch):
     _patch_conn(monkeypatch, cur)
     database.get_pending_products()  # sem niche -> geral (compat temporária)
     query, _ = cur.executed[0]
-    assert "Produtos" in identifiers_in(query)
+    assert identifiers_in(query) == {"Produtos"}
+
+
+def test_upsert_products_batch_usa_tabela_do_nicho(monkeypatch):
+    cur = FakeCursor()
+    _patch_conn(monkeypatch, cur)
+    produto = {"nome": "X", "id_produto": "MLB1", "imagem": "i",
+               "preco": "p", "link": "l"}
+    database.upsert_products_batch([produto], CARROS)
+    query, _ = cur.executed[0]
+    assert "Produtos_carros" in identifiers_in(query)
