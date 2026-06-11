@@ -2,7 +2,7 @@ import time
 
 import requests
 
-from app.config import ML_COOKIES, ML_CSRF_TOKEN, ML_AFFILIATE_TAG
+from app.config import ML_COOKIES, ML_CSRF_TOKEN, ML_AFFILIATE_TAG, Niche
 from app.database import (
     count_affiliate_failures,
     get_pending_products,
@@ -70,7 +70,7 @@ def create_affiliate_link(product_url: str, log: OpLogger,
     return affiliate_url
 
 
-def _process_products(products: list[dict], log: OpLogger):
+def _process_products(products: list[dict], log: OpLogger, niche: Niche):
     total = len(products)
     success = 0
     failed = 0
@@ -89,7 +89,7 @@ def _process_products(products: list[dict], log: OpLogger):
 
         if affiliate_link:
             try:
-                update_affiliate_link(pid, affiliate_link)
+                update_affiliate_link(pid, affiliate_link, niche)
                 log.info("update_db", "Status → PRONTO", product_id=pid,
                          affiliate_url=affiliate_link)
                 success += 1
@@ -100,9 +100,9 @@ def _process_products(products: list[dict], log: OpLogger):
         else:
             failed += 1
             try:
-                failures = count_affiliate_failures(pid)
+                failures = count_affiliate_failures(pid, niche)
                 if failures >= 3:
-                    mark_as_failed(pid)
+                    mark_as_failed(pid, niche)
                     log.warning("permanent_fail",
                                 f"Produto marcado como FALHA após {failures} tentativas",
                                 product_id=pid)
@@ -119,19 +119,19 @@ def _process_products(products: list[dict], log: OpLogger):
     if total > 0 and success == 0:
         log.error("alert", "Todos os links falharam — cookies podem ter expirado")
         send_alert(
-            "⚠️ ALERTA BOT PROMO ⚠️\n\n"
+            f"⚠️ ALERTA BOT PROMO [{niche.key.upper()}] ⚠️\n\n"
             f"Geração de links falhou em todos os {total} produtos.\n"
             "Os cookies do Mercado Livre provavelmente expiraram.\n\n"
             "Atualize ML_COOKIES e ML_CSRF_TOKEN no EasyPanel."
         )
 
 
-def run_affiliate_generation():
-    log = OpLogger("affiliate")
-    log.info("start", "Iniciando geração de links de afiliado")
+def run_affiliate_generation(niche: Niche):
+    log = OpLogger("affiliate", niche)
+    log.info("start", f"Iniciando geração de links de afiliado [{niche.key}]")
 
     try:
-        products = get_pending_products()
+        products = get_pending_products(niche)
     except Exception as e:
         log.error("fetch", "Falha ao buscar produtos pendentes", exc=e)
         return
@@ -141,15 +141,15 @@ def run_affiliate_generation():
         return
 
     log.info("fetch", f"{len(products)} produtos pendentes", count=len(products))
-    _process_products(products, log)
+    _process_products(products, log, niche)
 
 
-def run_retry_null_links():
-    log = OpLogger("retry")
-    log.info("start", "Retentando links nulos")
+def run_retry_null_links(niche: Niche):
+    log = OpLogger("retry", niche)
+    log.info("start", f"Retentando links nulos [{niche.key}]")
 
     try:
-        products = get_ready_with_null_links()
+        products = get_ready_with_null_links(niche)
     except Exception as e:
         log.error("fetch", "Falha ao buscar produtos com link nulo", exc=e)
         return
@@ -159,4 +159,4 @@ def run_retry_null_links():
         return
 
     log.info("fetch", f"{len(products)} produtos com link nulo", count=len(products))
-    _process_products(products, log)
+    _process_products(products, log, niche)

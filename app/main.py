@@ -1,10 +1,11 @@
 from contextlib import asynccontextmanager
+from functools import partial
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from app.config import TZ, PORT
+from app.config import TZ, PORT, NICHES, NICHE_BY_KEY
 from app.scraper import run_scraping
 from app.affiliate import run_affiliate_generation, run_retry_null_links
 from app.whatsapp import run_send_whatsapp, send_alert
@@ -13,69 +14,55 @@ from app.logger import OpLogger, flush_logs, cleanup_old_logs
 
 scheduler = BackgroundScheduler(timezone=TZ)
 
+JOB_FUNCS = {
+    "scraping":  run_scraping,
+    "affiliate": run_affiliate_generation,
+    "retry":     run_retry_null_links,
+    "whatsapp":  run_send_whatsapp,
+}
+
 
 def run_cleanup():
-    log = OpLogger("cleanup")
+    log = OpLogger("cleanup")  # logs administrativos → nicho geral
     log.info("start", "Iniciando limpeza programada")
 
-    try:
-        prod_old = cleanup_old_products()
-        log.info("old_products", f"{prod_old} produtos com +8 dias removidos",
-                 deleted=prod_old)
-    except Exception as e:
-        log.error("old_products", f"Falha: {e}", exc=e)
+    for niche in NICHES:
+        try:
+            prod_old = cleanup_old_products(niche)
+            log.info("old_products", f"[{niche.key}] {prod_old} produtos +8 dias removidos",
+                     deleted=prod_old)
+        except Exception as e:
+            log.error("old_products", f"[{niche.key}] Falha: {e}", exc=e)
 
-    try:
-        prod_null = cleanup_null_links()
-        log.info("null_links", f"{prod_null} produtos PRONTO sem link removidos",
-                 deleted=prod_null)
-    except Exception as e:
-        log.error("null_links", f"Falha: {e}", exc=e)
+        try:
+            prod_null = cleanup_null_links(niche)
+            log.info("null_links", f"[{niche.key}] {prod_null} PRONTO sem link removidos",
+                     deleted=prod_null)
+        except Exception as e:
+            log.error("null_links", f"[{niche.key}] Falha: {e}", exc=e)
 
     try:
         logs_deleted = cleanup_old_logs()
-        log.info("old_logs", f"{logs_deleted} logs com +15 dias removidos",
-                 deleted=logs_deleted)
+        log.info("old_logs", f"{logs_deleted} logs com +15 dias removidos", deleted=logs_deleted)
     except Exception as e:
         log.error("old_logs", f"Falha: {e}", exc=e)
 
     log.info("done", "Limpeza concluída")
 
 
-def setup_jobs():
-    # Scraping: a cada hora das 06 às 22
-    scheduler.add_job(
-        run_scraping,
-        CronTrigger(hour="6-22", minute=0, timezone=TZ),
-        id="scraping",
-        replace_existing=True,
-    )
+def setup_jobs(scheduler):
+    for niche in NICHES:
+        for job_name, crons in niche.schedules.items():
+            for i, cron in enumerate(crons):
+                suffix = f"_{i}" if len(crons) > 1 else ""
+                scheduler.add_job(
+                    partial(JOB_FUNCS[job_name], niche),
+                    CronTrigger(timezone=TZ, **cron),
+                    id=f"{job_name}_{niche.key}{suffix}",
+                    replace_existing=True,
+                )
 
-    # Links de afiliado: a cada hora + 5 min das 06 às 22
-    scheduler.add_job(
-        run_affiliate_generation,
-        CronTrigger(hour="6-22", minute=5, timezone=TZ),
-        id="affiliate",
-        replace_existing=True,
-    )
-
-    # Retry links nulos: a cada 4 horas
-    scheduler.add_job(
-        run_retry_null_links,
-        CronTrigger(hour="*/4", timezone=TZ),
-        id="retry_links",
-        replace_existing=True,
-    )
-
-    # Envio WhatsApp: a cada 7 min das 6h às 22h
-    scheduler.add_job(
-        run_send_whatsapp,
-        CronTrigger(minute="*/7", hour="6-22", timezone=TZ),
-        id="whatsapp",
-        replace_existing=True,
-    )
-
-    # Limpeza: meia-noite
+    # Limpeza global: meia-noite
     scheduler.add_job(
         run_cleanup,
         CronTrigger(hour=0, minute=0, timezone=TZ),
@@ -84,9 +71,19 @@ def setup_jobs():
     )
 
 
+def resolve_niches(niche: str | None):
+    """Sem param → todos os nichos. Param válido → [nicho]. Inválido → 400."""
+    if niche is None:
+        return NICHES
+    if niche not in NICHE_BY_KEY:
+        raise HTTPException(status_code=400,
+                            detail=f"Nicho inválido: {niche}. Use: {list(NICHE_BY_KEY)}")
+    return [NICHE_BY_KEY[niche]]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    setup_jobs()
+    setup_jobs(scheduler)
     scheduler.start()
     log = OpLogger("system")
     log.info("startup", f"Scheduler iniciado com {len(scheduler.get_jobs())} jobs")
@@ -119,33 +116,46 @@ def get_logs(
     module: str = Query(None, description="scraper, affiliate, retry, whatsapp, cleanup"),
     request_id: str = Query(None, description="ID da operação (8 chars)"),
     product_id: str = Query(None, description="ID do produto (ex: MLB1234567)"),
+    niche: str = Query("geral", description="geral | carros"),
 ):
     """Consulta logs estruturados. Combina filtros com AND."""
+    if niche not in NICHE_BY_KEY:
+        raise HTTPException(status_code=400, detail=f"Nicho inválido: {niche}")
     return query_logs(
         limit=limit,
         level=level,
         module=module,
         request_id=request_id,
         product_id=product_id,
+        niche=NICHE_BY_KEY[niche],
     )
 
 
 @app.post("/trigger/scraping")
-def trigger_scraping():
-    scheduler.add_job(run_scraping, id="manual_scraping", replace_existing=True)
-    return {"status": "triggered", "job": "scraping"}
+def trigger_scraping(niche: str = Query(None)):
+    targets = resolve_niches(niche)
+    for n in targets:
+        scheduler.add_job(partial(run_scraping, n),
+                          id=f"manual_scraping_{n.key}", replace_existing=True)
+    return {"status": "triggered", "job": "scraping", "niches": [n.key for n in targets]}
 
 
 @app.post("/trigger/affiliate")
-def trigger_affiliate():
-    scheduler.add_job(run_affiliate_generation, id="manual_affiliate", replace_existing=True)
-    return {"status": "triggered", "job": "affiliate"}
+def trigger_affiliate(niche: str = Query(None)):
+    targets = resolve_niches(niche)
+    for n in targets:
+        scheduler.add_job(partial(run_affiliate_generation, n),
+                          id=f"manual_affiliate_{n.key}", replace_existing=True)
+    return {"status": "triggered", "job": "affiliate", "niches": [n.key for n in targets]}
 
 
 @app.post("/trigger/whatsapp")
-def trigger_whatsapp():
-    scheduler.add_job(run_send_whatsapp, id="manual_whatsapp", replace_existing=True)
-    return {"status": "triggered", "job": "whatsapp"}
+def trigger_whatsapp(niche: str = Query(None)):
+    targets = resolve_niches(niche)
+    for n in targets:
+        scheduler.add_job(partial(run_send_whatsapp, n),
+                          id=f"manual_whatsapp_{n.key}", replace_existing=True)
+    return {"status": "triggered", "job": "whatsapp", "niches": [n.key for n in targets]}
 
 
 @app.post("/trigger/alert")
@@ -156,14 +166,17 @@ def trigger_alert():
 
 
 @app.post("/trigger/full")
-def trigger_full():
-    """Executa o ciclo completo: scraping → links."""
-    def full_cycle():
-        run_scraping()
-        run_affiliate_generation()
+def trigger_full(niche: str = Query(None)):
+    """Executa o ciclo completo (scraping → links) para o(s) nicho(s)."""
+    targets = resolve_niches(niche)
 
-    scheduler.add_job(full_cycle, id="manual_full", replace_existing=True)
-    return {"status": "triggered", "job": "full_cycle"}
+    def full_cycle(selected):
+        for n in selected:
+            run_scraping(n)
+            run_affiliate_generation(n)
+
+    scheduler.add_job(partial(full_cycle, targets), id="manual_full", replace_existing=True)
+    return {"status": "triggered", "job": "full_cycle", "niches": [n.key for n in targets]}
 
 
 if __name__ == "__main__":
