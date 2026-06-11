@@ -29,3 +29,8 @@ def test_niche_e_imutavel():
     import pytest
     with pytest.raises(dataclasses.FrozenInstanceError):
         NICHE_BY_KEY["geral"].key = "x"
+
+
+def test_limiar_de_desconto_por_nicho():
+    assert NICHE_BY_KEY["geral"].min_discount_pct == 30
+    assert NICHE_BY_KEY["carros"].min_discount_pct == 20

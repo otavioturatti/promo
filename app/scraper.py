@@ -73,7 +73,7 @@ def extract_product_id(url: str) -> str:
 
 # ── Scraping de uma categoria ──────────────────────────────
 
-def scrape_category(url: str, log: OpLogger) -> list[dict]:
+def scrape_category(url: str, log: OpLogger, min_discount: int = 30) -> list[dict]:
     # ── HTTP GET ────────────────────────────────────────────
     with log.timed() as t:
         try:
@@ -119,7 +119,7 @@ def scrape_category(url: str, log: OpLogger) -> list[dict]:
             skipped["price_parse"] += 1
             continue
 
-        if price["desconto_pct"] <= 30:
+        if price["desconto_pct"] <= min_discount:
             skipped["low_discount"] += 1
             continue
 
@@ -196,7 +196,7 @@ def run_scraping(niche: Niche):
             if not url:
                 continue
 
-            products = scrape_category(url, log)
+            products = scrape_category(url, log, niche.min_discount_pct)
 
             if products:
                 cat_ok += 1

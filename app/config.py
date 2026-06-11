@@ -30,6 +30,7 @@ class Niche:
     table_logs: str
     sendflow_release_id: str
     schedules: dict  # {job_name: [ {cron kwargs}, ... ]}
+    min_discount_pct: int = 30  # desconto mínimo p/ um produto entrar (descarta <= este valor)
 
 
 NICHES = [
@@ -62,6 +63,7 @@ NICHES = [
                 {"hour": 22,     "minute": 0},          # 22:00
             ],
         },
+        min_discount_pct=20,
     ),
 ]
 
