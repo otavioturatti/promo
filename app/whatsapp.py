@@ -1,3 +1,4 @@
+import random
 import re
 
 import requests
@@ -5,7 +6,8 @@ import requests
 from app.config import (
     SENDFLOW_TOKEN, SENDFLOW_ACCOUNT_ID, SENDFLOW_ALERT_RELEASE_ID, Niche,
 )
-from app.database import get_next_product_to_send, mark_as_sent
+from app.database import get_ready_candidates, get_recent_sent_names, mark_as_sent
+from app.dedup import is_duplicate
 from app.logger import OpLogger
 
 SENDFLOW_URL = "https://sendflow.pro/sendapi/actions/send-text-message"
@@ -107,21 +109,30 @@ def run_send_whatsapp(niche: Niche):
     log.info("start", f"Buscando próximo produto para enviar [{niche.key}]")
 
     try:
-        product = get_next_product_to_send(niche)
+        candidatos = get_ready_candidates(niche)
+        enviados = get_recent_sent_names(niche)
     except Exception as e:
-        log.error("fetch", "Falha ao buscar produto no banco", exc=e)
+        log.error("fetch", "Falha ao buscar produtos no banco", exc=e)
         return
 
-    if not product:
+    if not candidatos:
         log.info("fetch", "Nenhum produto pronto para enviar")
         return
+
+    frescos = [c for c in candidatos
+               if not is_duplicate(c.get("Nomes_Produtos", ""), enviados)]
+    pulados = len(candidatos) - len(frescos)
+    escolhidos = frescos or candidatos  # fallback: se todos forem duplicados, envia mesmo
+    product = random.choice(escolhidos)
 
     pid = product["id_produto"]
 
     log.info("fetch", f"Produto selecionado: {product.get('Nomes_Produtos', '')[:60]}",
              product_id=pid,
              nome=product.get("Nomes_Produtos", ""),
-             link_afiliado=product.get("Link_de_afiliado", ""))
+             link_afiliado=product.get("Link_de_afiliado", ""),
+             candidatos=len(candidatos), duplicados_pulados=pulados,
+             fallback=(len(frescos) == 0))
 
     caption = format_message(product)
     log.info("format", f"Mensagem formatada ({len(caption)} chars)",

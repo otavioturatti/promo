@@ -150,25 +150,38 @@ def get_ready_with_null_links(niche: Niche) -> list[dict]:
             return cur.fetchall()
 
 
-def get_next_product_to_send(niche: Niche) -> dict | None:
+def get_ready_candidates(niche: Niche, limit: int = 20) -> list[dict]:
+    """Os N produtos PRONTO mais recentes (com link de afiliado)."""
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            # Sorteia 1 entre os 20 mais recentes prontos
             cur.execute(
                 sql.SQL("""
-                    SELECT * FROM (
-                        SELECT * FROM {}
-                        WHERE "Status" = 'PRONTO'
-                          AND "Link_de_afiliado" IS NOT NULL
-                          AND "Link_de_afiliado" != ''
-                        ORDER BY "created_at" DESC
-                        LIMIT 20
-                    ) recentes
-                    ORDER BY RANDOM()
-                    LIMIT 1
-                """).format(sql.Identifier(niche.table_produtos))
+                    SELECT * FROM {}
+                    WHERE "Status" = 'PRONTO'
+                      AND "Link_de_afiliado" IS NOT NULL
+                      AND "Link_de_afiliado" != ''
+                    ORDER BY "created_at" DESC
+                    LIMIT %s
+                """).format(sql.Identifier(niche.table_produtos)),
+                (limit,),
             )
-            return cur.fetchone()
+            return cur.fetchall()
+
+
+def get_recent_sent_names(niche: Niche, limit: int = 500) -> list[str]:
+    """Nomes dos produtos ENVIADOS mais recentes (para deduplicação no envio)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                sql.SQL("""
+                    SELECT "Nomes_Produtos" FROM {}
+                    WHERE "Status" = 'ENVIADO'
+                    ORDER BY "created_at" DESC
+                    LIMIT %s
+                """).format(sql.Identifier(niche.table_produtos)),
+                (limit,),
+            )
+            return [row[0] for row in cur.fetchall() if row[0]]
 
 
 # ── Limpeza ─────────────────────────────────────────────────
