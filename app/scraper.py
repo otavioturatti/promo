@@ -1,4 +1,5 @@
 import re
+import json
 import random
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
@@ -85,6 +86,28 @@ def _with_page(url: str, page: int) -> str:
                        urlencode(q), parts.fragment))
 
 
+def _extract_social(card) -> str | None:
+    """Prova social do card (nota, nº avaliações, badge) como JSON, ou None."""
+    def txt(sel):
+        el = card.select_one(sel)
+        return el.get_text(" ", strip=True) if el else None
+
+    rating = txt(".poly-reviews__rating")
+    total = txt(".poly-reviews__total")        # ex.: "(25038)"
+    badge = txt(".poly-component__highlight")   # ex.: "MAIS VENDIDO"
+    if not (rating or total or badge):
+        return None
+
+    reviews = None
+    if total:
+        m = re.search(r"\d[\d.]*", total)
+        if m:
+            reviews = int(m.group(0).replace(".", ""))
+
+    return json.dumps({"rating": rating, "reviews": reviews, "badge": badge},
+                      ensure_ascii=False)
+
+
 def _scrape_page(url: str, log: OpLogger, min_discount: int) -> tuple[list[dict], int]:
     """Raspa UMA página; devolve (produtos_válidos, nº_de_cards_brutos)."""
     # ── HTTP GET ────────────────────────────────────────────
@@ -109,6 +132,13 @@ def _scrape_page(url: str, log: OpLogger, min_discount: int) -> tuple[list[dict]
     links = [el.get("href", "") for el in soup.select(".poly-card__content > h3 > a")]
     price_els = soup.select("div.poly-card__content > div.poly-component__price")
 
+    # Prova social, alinhada por card (degrada para None se a contagem não bater)
+    card_divs = soup.select("div.poly-card__content")
+    if len(card_divs) == len(names):
+        socials = [_extract_social(c) for c in card_divs]
+    else:
+        socials = [None] * len(names)
+
     log.info("parse", f"Elementos: {len(names)} nomes, {len(images)} imgs, "
              f"{len(price_els)} preços, {len(links)} links",
              names=len(names), images=len(images),
@@ -118,7 +148,7 @@ def _scrape_page(url: str, log: OpLogger, min_discount: int) -> tuple[list[dict]
     products = []
     skipped = {"empty": 0, "click1": 0, "price_parse": 0, "low_discount": 0, "no_id": 0}
 
-    for name, image, price_el, link in zip(names, images, price_els, links):
+    for name, image, price_el, link, social in zip(names, images, price_els, links, socials):
         if not all([name, image, link]):
             skipped["empty"] += 1
             continue
@@ -152,6 +182,7 @@ def _scrape_page(url: str, log: OpLogger, min_discount: int) -> tuple[list[dict]
             "preco": preco_formatado,
             "link": link,
             "id_produto": id_produto,
+            "social": social,
         })
 
     log.info("filter", f"{len(products)} produtos válidos | "

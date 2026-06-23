@@ -25,15 +25,43 @@ def test_send_text_message_usa_release_id_recebido(monkeypatch):
     assert captured["json"]["releaseId"] == "REL_CARROS"
 
 
-def test_format_message_inalterado():
+def test_format_message_sem_prova_social_degrada():
     msg = whatsapp.format_message({
         "Nomes_Produtos": "Pneu X",
         "Preco": "R$500,00\nR$300,00\n40% OFF",
         "Link_de_afiliado": "http://aff/y",
     })
     assert "Pneu X" in msg
-    assert "De: R$500,00 Por: R$300,00 (40% OFF)" in msg
+    assert "De: R$500 Por: R$300 (40% OFF" in msg   # normalizado p/ padrão BR
+    assert "economize R$200" in msg          # ancoragem reforçada
+    assert "⭐" not in msg                     # sem prova social, sem linha
     assert "http://aff/y" in msg
+
+
+def test_format_message_com_prova_social():
+    import json
+    msg = whatsapp.format_message({
+        "Nomes_Produtos": "Kit 6 Cuecas Lupo",
+        "Preco": "R$129,90\nR$59,90\n54% OFF",
+        "Link_de_afiliado": "http://aff/z",
+        "social_proof": json.dumps({"rating": "4,9", "reviews": 49256,
+                                     "badge": "MAIS VENDIDO"}),
+    })
+    assert "🏆 MAIS VENDIDO" in msg
+    assert "⭐ 4,9" in msg
+    assert "49 mil avaliações" in msg
+    assert "economize R$70" in msg
+
+
+def test_num_aceita_ponto_e_virgula():
+    assert whatsapp._num("R$131.61") == 131.61    # ponto decimal
+    assert whatsapp._num("R$1.899") == 1899        # ponto = milhar
+    assert whatsapp._num("R$500,00") == 500.0      # vírgula decimal
+
+
+def test_format_social_vazio_quando_sem_dados():
+    assert whatsapp._format_social(None) == ""
+    assert whatsapp._format_social("não-json") == ""
 
 
 def test_run_send_whatsapp_pula_duplicado(monkeypatch):
