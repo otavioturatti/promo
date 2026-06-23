@@ -47,7 +47,7 @@ def test_format_message_com_prova_social():
         "social_proof": json.dumps({"rating": "4,9", "reviews": 49256,
                                      "badge": "MAIS VENDIDO"}),
     })
-    assert "🏆 MAIS VENDIDO" in msg
+    assert "🏆" not in msg                      # badge removido da mensagem
     assert "⭐ 4,9" in msg
     assert "49 mil avaliações" in msg
     assert "economize R$70" in msg
@@ -60,22 +60,14 @@ def test_prova_social_nota_baixa_e_omitida():
         {"rating": "4.1", "reviews": 5000, "badge": None})) == ""
 
 
-def test_prova_social_nota_baixa_mas_badge_factual_aparece():
+def test_prova_social_nunca_mostra_badge():
     import json
-    # nota fraca é omitida, mas o badge factual (MAIS VENDIDO) permanece
-    out = whatsapp._format_social(json.dumps(
-        {"rating": "4.1", "reviews": 5000, "badge": "MAIS VENDIDO"}))
-    assert "🏆 MAIS VENDIDO" in out
-    assert "⭐" not in out
-
-
-def test_prova_social_badge_marketing_e_descartado():
-    import json
-    # "OFERTA IMPERDÍVEL"/"OFERTA DO DIA" não são prova social → não aparecem
-    for b in ("OFERTA IMPERDÍVEL", "OFERTA DO DIA"):
+    # badge não entra mais na mensagem, seja qual for
+    for b in ("MAIS VENDIDO", "OFERTA IMPERDÍVEL", "OFERTA DO DIA"):
         out = whatsapp._format_social(json.dumps(
-            {"rating": "4.1", "reviews": 5000, "badge": b}))
-        assert out == ""        # nota < piso e badge não-factual → linha vazia
+            {"rating": "4.9", "reviews": 5000, "badge": b}))
+        assert "🏆" not in out
+        assert "⭐ 4.9" in out
 
 
 def test_prova_social_poucas_avaliacoes_mostra_nota_sem_contagem():
