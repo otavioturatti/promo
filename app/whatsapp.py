@@ -46,6 +46,10 @@ def _fmt_reviews(n: int) -> str:
 MIN_RATING = 4.5
 MIN_REVIEWS = 100
 
+# Só exibimos badge que é prova social REAL (comportamento de compra).
+# "OFERTA IMPERDÍVEL" é marketing genérico; "OFERTA DO DIA" é time-bound → fora.
+BADGE_WHITELIST = {"MAIS VENDIDO"}
+
 # CTAs alternados para evitar habituação (mensagem sempre igual = ignorada).
 CTA_VARIANTS = [
     "GARANTA O SEU AQUI 👇",
@@ -72,8 +76,8 @@ def _format_social(raw) -> str:
     except (ValueError, TypeError):
         return ""
     bits = []
-    if d.get("badge"):
-        bits.append(f"🏆 {d['badge']}")          # badge da ML é sempre positivo
+    if d.get("badge") in BADGE_WHITELIST:
+        bits.append(f"🏆 {d['badge']}")          # só badge factual (ex.: MAIS VENDIDO)
     rating = _parse_rating(d.get("rating"))
     if rating is not None and rating >= MIN_RATING:
         r = f"⭐ {d['rating']}"
