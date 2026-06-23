@@ -112,3 +112,48 @@ def test_run_send_whatsapp_pula_duplicado(monkeypatch):
 
     # MLB1 é duplicado de um enviado recente -> deve escolher o fresco MLB2
     assert enviado["pid"] == "MLB2"
+
+
+def _mock_send(monkeypatch, candidatos):
+    monkeypatch.setattr(whatsapp, "get_ready_candidates", lambda niche: candidatos)
+    monkeypatch.setattr(whatsapp, "get_recent_sent_names", lambda niche: [])
+    monkeypatch.setattr(whatsapp, "send_text_message",
+                        lambda msg, log, rel, product_id=None: True)
+    enviado = {}
+    monkeypatch.setattr(whatsapp, "mark_as_sent",
+                        lambda pid, niche: enviado.update(pid=pid))
+    return enviado
+
+
+def test_run_send_whatsapp_pula_categoria_em_cooldown(monkeypatch):
+    candidatos = [
+        {"id_produto": "MLB1", "Nomes_Produtos": "Fone bluetooth gamer rgb",
+         "Preco": "R$10\nR$8\n20% OFF", "Link_de_afiliado": "http://a",
+         "categoria": "Eletrônicos"},
+        {"id_produto": "MLB2", "Nomes_Produtos": "Racao premium gatos castrados",
+         "Preco": "R$50\nR$40\n20% OFF", "Link_de_afiliado": "http://b",
+         "categoria": "Pet Shop"},
+    ]
+    enviado = _mock_send(monkeypatch, candidatos)
+    whatsapp._recent_categories[CARROS.key].clear()
+    whatsapp._recent_categories[CARROS.key].append("Eletrônicos")   # em cooldown
+
+    whatsapp.run_send_whatsapp(CARROS)
+
+    assert enviado["pid"] == "MLB2"                                  # pulou Eletrônicos
+    assert "Pet Shop" in whatsapp._recent_categories[CARROS.key]     # entrou na fila
+
+
+def test_run_send_whatsapp_fallback_quando_todas_categorias_em_cooldown(monkeypatch):
+    candidatos = [
+        {"id_produto": "MLB9", "Nomes_Produtos": "Mouse sem fio ergonomico",
+         "Preco": "R$10\nR$8\n20% OFF", "Link_de_afiliado": "http://a",
+         "categoria": "Eletrônicos"},
+    ]
+    enviado = _mock_send(monkeypatch, candidatos)
+    whatsapp._recent_categories[CARROS.key].clear()
+    whatsapp._recent_categories[CARROS.key].append("Eletrônicos")   # único, em cooldown
+
+    whatsapp.run_send_whatsapp(CARROS)
+
+    assert enviado["pid"] == "MLB9"     # fallback: envia mesmo

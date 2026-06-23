@@ -282,6 +282,7 @@ def run_scraping(niche: Niche):
             for p in products:
                 if p["id_produto"] not in seen_ids:
                     seen_ids.add(p["id_produto"])
+                    p["categoria"] = cat.get("categoria") or cat.get("Categoria")
                     all_products.append(p)
 
     log.info("deduplicate", f"{len(all_products)} produtos únicos de {len(seen_ids)} IDs",

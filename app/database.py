@@ -39,17 +39,19 @@ def _upsert_sql(niche: Niche):
     return sql.SQL("""
         INSERT INTO {t} (
             "Nomes_Produtos", "id_produto", "Imagem_Produtos",
-            "Preco", "Link_Compra", "Status", "created_at", "social_proof"
+            "Preco", "Link_Compra", "Status", "created_at", "social_proof", "categoria"
         ) VALUES (
             %(nome)s, %(id_produto)s, %(imagem)s,
-            %(preco)s, %(link)s, 'PENDENTE', NOW(), %(social)s
+            %(preco)s, %(link)s, 'PENDENTE', NOW(), %(social)s, %(categoria)s
         )
         ON CONFLICT ("id_produto")
         DO UPDATE SET "Preco" = EXCLUDED."Preco",
-                      "social_proof" = EXCLUDED."social_proof"
+                      "social_proof" = EXCLUDED."social_proof",
+                      "categoria" = EXCLUDED."categoria"
         WHERE {t}."Status" != 'ENVIADO'
           AND ({t}."Preco" != EXCLUDED."Preco"
-               OR {t}."social_proof" IS NULL);
+               OR {t}."social_proof" IS NULL
+               OR {t}."categoria" IS NULL);
     """).format(t=t)
 
 
@@ -63,6 +65,7 @@ def upsert_product(conn, product: dict, niche: Niche) -> bool:
             "preco": product["preco"],
             "link": product["link"],
             "social": product.get("social"),
+            "categoria": product.get("categoria"),
         })
         return cur.rowcount > 0
 
@@ -153,7 +156,7 @@ def get_ready_with_null_links(niche: Niche) -> list[dict]:
             return cur.fetchall()
 
 
-def get_ready_candidates(niche: Niche, limit: int = 20) -> list[dict]:
+def get_ready_candidates(niche: Niche, limit: int = 40) -> list[dict]:
     """Os N produtos PRONTO mais recentes (com link), priorizando os que têm prova social."""
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:

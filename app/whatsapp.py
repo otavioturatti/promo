@@ -1,6 +1,7 @@
 import json
 import random
 import re
+from collections import defaultdict, deque
 
 import requests
 
@@ -12,6 +13,10 @@ from app.dedup import is_duplicate
 from app.logger import OpLogger
 
 SENDFLOW_URL = "https://sendflow.pro/sendapi/actions/send-text-message"
+
+# Cooldown de categoria: não repetir uma categoria nos últimos N envios (por nicho).
+CATEGORY_COOLDOWN = 5
+_recent_categories: dict = defaultdict(lambda: deque(maxlen=CATEGORY_COOLDOWN))
 
 
 # ── Formata mensagem ───────────────────────────────────────
@@ -198,7 +203,13 @@ def run_send_whatsapp(niche: Niche):
     frescos = [c for c in candidatos
                if not is_duplicate(c.get("Nomes_Produtos", ""), enviados)]
     pulados = len(candidatos) - len(frescos)
-    escolhidos = frescos or candidatos  # fallback: se todos forem duplicados, envia mesmo
+
+    # Cooldown de categoria: evita repetir categoria nos últimos N envios
+    recentes = _recent_categories[niche.key]
+    frescos_cat = [c for c in frescos
+                   if not c.get("categoria") or c.get("categoria") not in recentes]
+    cat_pulados = len(frescos) - len(frescos_cat)
+    escolhidos = frescos_cat or frescos or candidatos  # fallbacks em cascata
     product = random.choice(escolhidos)
 
     pid = product["id_produto"]
@@ -207,8 +218,11 @@ def run_send_whatsapp(niche: Niche):
              product_id=pid,
              nome=product.get("Nomes_Produtos", ""),
              link_afiliado=product.get("Link_de_afiliado", ""),
+             categoria=product.get("categoria"),
              candidatos=len(candidatos), duplicados_pulados=pulados,
-             fallback=(len(frescos) == 0))
+             categoria_pulada=cat_pulados,
+             fallback=(len(frescos) == 0),
+             fallback_categoria=(len(frescos_cat) == 0 and len(frescos) > 0))
 
     caption = format_message(product)
     log.info("format", f"Mensagem formatada ({len(caption)} chars)",
@@ -224,5 +238,9 @@ def run_send_whatsapp(niche: Niche):
     except Exception as e:
         log.error("mark_sent", f"Falha ao marcar como enviado: {e}", product_id=pid, exc=e)
         return
+
+    cat = product.get("categoria")
+    if cat:
+        _recent_categories[niche.key].append(cat)
 
     log.info("done", "Produto enviado com sucesso", product_id=pid)
