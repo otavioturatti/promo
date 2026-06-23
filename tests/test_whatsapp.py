@@ -60,13 +60,22 @@ def test_prova_social_nota_baixa_e_omitida():
         {"rating": "4.1", "reviews": 5000, "badge": None})) == ""
 
 
-def test_prova_social_nota_baixa_mas_badge_aparece():
+def test_prova_social_nota_baixa_mas_badge_factual_aparece():
     import json
-    # nota fraca é omitida, mas o badge da ML (positivo) permanece
+    # nota fraca é omitida, mas o badge factual (MAIS VENDIDO) permanece
     out = whatsapp._format_social(json.dumps(
-        {"rating": "4.1", "reviews": 5000, "badge": "OFERTA DO DIA"}))
-    assert "🏆 OFERTA DO DIA" in out
+        {"rating": "4.1", "reviews": 5000, "badge": "MAIS VENDIDO"}))
+    assert "🏆 MAIS VENDIDO" in out
     assert "⭐" not in out
+
+
+def test_prova_social_badge_marketing_e_descartado():
+    import json
+    # "OFERTA IMPERDÍVEL"/"OFERTA DO DIA" não são prova social → não aparecem
+    for b in ("OFERTA IMPERDÍVEL", "OFERTA DO DIA"):
+        out = whatsapp._format_social(json.dumps(
+            {"rating": "4.1", "reviews": 5000, "badge": b}))
+        assert out == ""        # nota < piso e badge não-factual → linha vazia
 
 
 def test_prova_social_poucas_avaliacoes_mostra_nota_sem_contagem():
