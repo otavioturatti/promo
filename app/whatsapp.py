@@ -41,8 +41,30 @@ def _fmt_reviews(n: int) -> str:
     return f"{round(n / 1000)} mil" if n >= 1000 else str(n)
 
 
+# Pisos de qualidade: só exibimos prova social que de fato persuade.
+# Nota baixa ou poucas avaliações = prova social fraca/negativa → omitir.
+MIN_RATING = 4.5
+MIN_REVIEWS = 100
+
+# CTAs alternados para evitar habituação (mensagem sempre igual = ignorada).
+CTA_VARIANTS = [
+    "GARANTA O SEU AQUI 👇",
+    "PEGUE O SEU AQUI 👇",
+    "APROVEITE AQUI 👇",
+    "CONFIRA A OFERTA AQUI 👇",
+    "VER NO MERCADO LIVRE 👇",
+]
+
+
+def _parse_rating(s):
+    try:
+        return float(str(s).replace(",", "."))
+    except (ValueError, TypeError):
+        return None
+
+
 def _format_social(raw) -> str:
-    """Linha de prova social a partir do JSON salvo; '' se não houver."""
+    """Linha de prova social a partir do JSON salvo, aplicando pisos; '' se nada qualifica."""
     if not raw:
         return ""
     try:
@@ -51,11 +73,13 @@ def _format_social(raw) -> str:
         return ""
     bits = []
     if d.get("badge"):
-        bits.append(f"🏆 {d['badge']}")
-    if d.get("rating"):
+        bits.append(f"🏆 {d['badge']}")          # badge da ML é sempre positivo
+    rating = _parse_rating(d.get("rating"))
+    if rating is not None and rating >= MIN_RATING:
         r = f"⭐ {d['rating']}"
-        if d.get("reviews"):
-            r += f" ({_fmt_reviews(int(d['reviews']))} avaliações)"
+        reviews = d.get("reviews")
+        if reviews and int(reviews) >= MIN_REVIEWS:
+            r += f" ({_fmt_reviews(int(reviews))} avaliações)"
         bits.append(r)
     return "  ·  ".join(bits)
 
@@ -89,7 +113,7 @@ def format_message(product: dict) -> str:
         msg += f"{social_line}\n"
     msg += "\n"
     msg += f"De: {orig_disp} Por: {desc_disp} ({pct} OFF{economia})"
-    msg += f"\n\n{link}\nGARANTA O SEU AQUI"
+    msg += f"\n\n{link}\n{random.choice(CTA_VARIANTS)}"
 
     return msg
 

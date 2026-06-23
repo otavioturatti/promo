@@ -53,6 +53,31 @@ def test_format_message_com_prova_social():
     assert "economize R$70" in msg
 
 
+def test_prova_social_nota_baixa_e_omitida():
+    import json
+    # nota 4.1 < piso (4.5) e sem badge → linha de prova social vazia
+    assert whatsapp._format_social(json.dumps(
+        {"rating": "4.1", "reviews": 5000, "badge": None})) == ""
+
+
+def test_prova_social_nota_baixa_mas_badge_aparece():
+    import json
+    # nota fraca é omitida, mas o badge da ML (positivo) permanece
+    out = whatsapp._format_social(json.dumps(
+        {"rating": "4.1", "reviews": 5000, "badge": "OFERTA DO DIA"}))
+    assert "🏆 OFERTA DO DIA" in out
+    assert "⭐" not in out
+
+
+def test_prova_social_poucas_avaliacoes_mostra_nota_sem_contagem():
+    import json
+    # nota boa mas poucas avaliações (< 100) → mostra a nota, esconde a contagem fraca
+    out = whatsapp._format_social(json.dumps(
+        {"rating": "4.8", "reviews": 12, "badge": None}))
+    assert "⭐ 4.8" in out
+    assert "avaliações" not in out
+
+
 def test_num_aceita_ponto_e_virgula():
     assert whatsapp._num("R$131.61") == 131.61    # ponto decimal
     assert whatsapp._num("R$1.899") == 1899        # ponto = milhar
