@@ -108,6 +108,19 @@ def _extract_social(card) -> str | None:
                       ensure_ascii=False)
 
 
+MIN_RATING = 4.2  # descarta produtos com nota abaixo disso (só entra coisa boa)
+
+
+def _rating_from_social(social) -> float | None:
+    if not social:
+        return None
+    try:
+        r = json.loads(social).get("rating")
+        return float(str(r).replace(",", ".")) if r else None
+    except (ValueError, TypeError):
+        return None
+
+
 def _scrape_page(url: str, log: OpLogger, min_discount: int) -> tuple[list[dict], int]:
     """Raspa UMA página; devolve (produtos_válidos, nº_de_cards_brutos)."""
     # ── HTTP GET ────────────────────────────────────────────
@@ -127,17 +140,14 @@ def _scrape_page(url: str, log: OpLogger, min_discount: int) -> tuple[list[dict]
     # ── Parse HTML ──────────────────────────────────────────
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    names = [el.get_text(strip=True) for el in soup.select(".poly-card__content > h3 > a")]
+    anchors = soup.select(".poly-card__content > h3 > a")
+    names = [el.get_text(strip=True) for el in anchors]
     images = [el.get("src", "") for el in soup.select("img.poly-component__picture")]
-    links = [el.get("href", "") for el in soup.select(".poly-card__content > h3 > a")]
+    links = [el.get("href", "") for el in anchors]
     price_els = soup.select("div.poly-card__content > div.poly-component__price")
 
-    # Prova social, alinhada por card (degrada para None se a contagem não bater)
-    card_divs = soup.select("div.poly-card__content")
-    if len(card_divs) == len(names):
-        socials = [_extract_social(c) for c in card_divs]
-    else:
-        socials = [None] * len(names)
+    # Prova social do card de cada título → alinhada 1:1 com names/links
+    socials = [_extract_social(a.find_parent(class_="poly-card__content")) for a in anchors]
 
     log.info("parse", f"Elementos: {len(names)} nomes, {len(images)} imgs, "
              f"{len(price_els)} preços, {len(links)} links",
@@ -146,7 +156,8 @@ def _scrape_page(url: str, log: OpLogger, min_discount: int) -> tuple[list[dict]
 
     # ── Montar produtos ────────────────────────────────────
     products = []
-    skipped = {"empty": 0, "click1": 0, "price_parse": 0, "low_discount": 0, "no_id": 0}
+    skipped = {"empty": 0, "click1": 0, "price_parse": 0, "low_discount": 0,
+               "no_id": 0, "low_rating": 0}
 
     for name, image, price_el, link, social in zip(names, images, price_els, links, socials):
         if not all([name, image, link]):
@@ -169,6 +180,11 @@ def _scrape_page(url: str, log: OpLogger, min_discount: int) -> tuple[list[dict]
         id_produto = extract_product_id(link)
         if id_produto == "SEM_ID":
             skipped["no_id"] += 1
+            continue
+
+        rating = _rating_from_social(social)
+        if rating is not None and rating < MIN_RATING:
+            skipped["low_rating"] += 1
             continue
 
         # Salva preço já formatado para exibição no WhatsApp
