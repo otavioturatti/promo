@@ -1,4 +1,5 @@
 import re
+import json
 import random
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
@@ -85,6 +86,41 @@ def _with_page(url: str, page: int) -> str:
                        urlencode(q), parts.fragment))
 
 
+def _extract_social(card) -> str | None:
+    """Prova social do card (nota, nº avaliações, badge) como JSON, ou None."""
+    def txt(sel):
+        el = card.select_one(sel)
+        return el.get_text(" ", strip=True) if el else None
+
+    rating = txt(".poly-reviews__rating")
+    total = txt(".poly-reviews__total")        # ex.: "(25038)"
+    badge = txt(".poly-component__highlight")   # ex.: "MAIS VENDIDO"
+    if not (rating or total or badge):
+        return None
+
+    reviews = None
+    if total:
+        m = re.search(r"\d[\d.]*", total)
+        if m:
+            reviews = int(m.group(0).replace(".", ""))
+
+    return json.dumps({"rating": rating, "reviews": reviews, "badge": badge},
+                      ensure_ascii=False)
+
+
+MIN_RATING = 4.2  # descarta produtos com nota abaixo disso (só entra coisa boa)
+
+
+def _rating_from_social(social) -> float | None:
+    if not social:
+        return None
+    try:
+        r = json.loads(social).get("rating")
+        return float(str(r).replace(",", ".")) if r else None
+    except (ValueError, TypeError):
+        return None
+
+
 def _scrape_page(url: str, log: OpLogger, min_discount: int) -> tuple[list[dict], int]:
     """Raspa UMA página; devolve (produtos_válidos, nº_de_cards_brutos)."""
     # ── HTTP GET ────────────────────────────────────────────
@@ -104,10 +140,14 @@ def _scrape_page(url: str, log: OpLogger, min_discount: int) -> tuple[list[dict]
     # ── Parse HTML ──────────────────────────────────────────
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    names = [el.get_text(strip=True) for el in soup.select(".poly-card__content > h3 > a")]
+    anchors = soup.select(".poly-card__content > h3 > a")
+    names = [el.get_text(strip=True) for el in anchors]
     images = [el.get("src", "") for el in soup.select("img.poly-component__picture")]
-    links = [el.get("href", "") for el in soup.select(".poly-card__content > h3 > a")]
+    links = [el.get("href", "") for el in anchors]
     price_els = soup.select("div.poly-card__content > div.poly-component__price")
+
+    # Prova social do card de cada título → alinhada 1:1 com names/links
+    socials = [_extract_social(a.find_parent(class_="poly-card__content")) for a in anchors]
 
     log.info("parse", f"Elementos: {len(names)} nomes, {len(images)} imgs, "
              f"{len(price_els)} preços, {len(links)} links",
@@ -116,9 +156,10 @@ def _scrape_page(url: str, log: OpLogger, min_discount: int) -> tuple[list[dict]
 
     # ── Montar produtos ────────────────────────────────────
     products = []
-    skipped = {"empty": 0, "click1": 0, "price_parse": 0, "low_discount": 0, "no_id": 0}
+    skipped = {"empty": 0, "click1": 0, "price_parse": 0, "low_discount": 0,
+               "no_id": 0, "low_rating": 0}
 
-    for name, image, price_el, link in zip(names, images, price_els, links):
+    for name, image, price_el, link, social in zip(names, images, price_els, links, socials):
         if not all([name, image, link]):
             skipped["empty"] += 1
             continue
@@ -141,6 +182,11 @@ def _scrape_page(url: str, log: OpLogger, min_discount: int) -> tuple[list[dict]
             skipped["no_id"] += 1
             continue
 
+        rating = _rating_from_social(social)
+        if rating is not None and rating < MIN_RATING:
+            skipped["low_rating"] += 1
+            continue
+
         # Salva preço já formatado para exibição no WhatsApp
         preco_formatado = (
             f"{price['original']}\n{price['desconto_valor']}\n{price['desconto_pct']}% OFF"
@@ -152,6 +198,7 @@ def _scrape_page(url: str, log: OpLogger, min_discount: int) -> tuple[list[dict]
             "preco": preco_formatado,
             "link": link,
             "id_produto": id_produto,
+            "social": social,
         })
 
     log.info("filter", f"{len(products)} produtos válidos | "

@@ -1,3 +1,4 @@
+import json
 import random
 import re
 
@@ -14,6 +15,74 @@ SENDFLOW_URL = "https://sendflow.pro/sendapi/actions/send-text-message"
 
 
 # ── Formata mensagem ───────────────────────────────────────
+
+def _num(s: str):
+    """Extrai o valor de uma string 'R$...'. Aceita 'R$131.61' e 'R$500,00'."""
+    m = re.search(r"R\$\s*([\d.,]+)", s or "")
+    if not m:
+        return None
+    raw = m.group(1)
+    if "," in raw:                       # vírgula decimal (ponto = milhar)
+        return float(raw.replace(".", "").replace(",", "."))
+    parts = raw.strip(".").split(".")    # só pontos
+    if len(parts) >= 2 and len(parts[-1]) == 2:   # último grupo = centavos
+        return float("".join(parts[:-1]) + "." + parts[-1])
+    return float("".join(parts))         # pontos = milhar
+
+
+def _brl(v: float) -> str:
+    s = f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    if s.endswith(",00"):
+        s = s[:-3]
+    return f"R${s}"
+
+
+def _fmt_reviews(n: int) -> str:
+    return f"{round(n / 1000)} mil" if n >= 1000 else str(n)
+
+
+# Pisos de qualidade: só exibimos prova social que de fato persuade.
+# Nota baixa ou poucas avaliações = prova social fraca/negativa → omitir.
+MIN_RATING = 4.5
+MIN_REVIEWS = 100
+
+# CTAs alternados para evitar habituação (mensagem sempre igual = ignorada).
+CTA_VARIANTS = [
+    "GARANTA O SEU AQUI 👇",
+    "PEGUE O SEU AQUI 👇",
+    "APROVEITE AQUI 👇",
+    "CONFIRA A OFERTA AQUI 👇",
+    "VER NO MERCADO LIVRE 👇",
+]
+
+
+def _parse_rating(s):
+    try:
+        return float(str(s).replace(",", "."))
+    except (ValueError, TypeError):
+        return None
+
+
+def _format_social(raw) -> str:
+    """Linha de prova social a partir do JSON salvo, aplicando pisos; '' se nada qualifica."""
+    if not raw:
+        return ""
+    try:
+        d = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):
+        return ""
+    bits = []
+    if d.get("badge"):
+        bits.append(f"🏆 {d['badge']}")          # badge da ML é sempre positivo
+    rating = _parse_rating(d.get("rating"))
+    if rating is not None and rating >= MIN_RATING:
+        r = f"⭐ {d['rating']}"
+        reviews = d.get("reviews")
+        if reviews and int(reviews) >= MIN_REVIEWS:
+            r += f" ({_fmt_reviews(int(reviews))} avaliações)"
+        bits.append(r)
+    return "  ·  ".join(bits)
+
 
 def format_message(product: dict) -> str:
     """
@@ -32,9 +101,19 @@ def format_message(product: dict) -> str:
     desconto = parts[1].strip() if len(parts) > 1 else ""
     pct = parts[2].strip().replace(" OFF", "") if len(parts) > 2 else ""
 
-    msg = f"{nome}\n\n"
-    msg += f"De: {original} Por: {desconto} ({pct} OFF)"
-    msg += f"\n\n{link}\nGARANTA O SEU AQUI"
+    social_line = _format_social(product.get("social_proof"))
+
+    o, d = _num(original), _num(desconto)
+    economia = f" — economize {_brl(o - d)}" if (o and d and o > d) else ""
+    orig_disp = _brl(o) if o else original       # normaliza p/ padrão BR (R$289,99)
+    desc_disp = _brl(d) if d else desconto
+
+    msg = f"{nome}\n"
+    if social_line:
+        msg += f"{social_line}\n"
+    msg += "\n"
+    msg += f"De: {orig_disp} Por: {desc_disp} ({pct} OFF{economia})"
+    msg += f"\n\n{link}\n{random.choice(CTA_VARIANTS)}"
 
     return msg
 

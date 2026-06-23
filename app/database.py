@@ -39,13 +39,14 @@ def _upsert_sql(niche: Niche):
     return sql.SQL("""
         INSERT INTO {t} (
             "Nomes_Produtos", "id_produto", "Imagem_Produtos",
-            "Preco", "Link_Compra", "Status", "created_at"
+            "Preco", "Link_Compra", "Status", "created_at", "social_proof"
         ) VALUES (
             %(nome)s, %(id_produto)s, %(imagem)s,
-            %(preco)s, %(link)s, 'PENDENTE', NOW()
+            %(preco)s, %(link)s, 'PENDENTE', NOW(), %(social)s
         )
         ON CONFLICT ("id_produto")
-        DO UPDATE SET "Preco" = EXCLUDED."Preco"
+        DO UPDATE SET "Preco" = EXCLUDED."Preco",
+                      "social_proof" = EXCLUDED."social_proof"
         WHERE {t}."Status" != 'ENVIADO'
           AND {t}."Preco" != EXCLUDED."Preco";
     """).format(t=t)
@@ -60,6 +61,7 @@ def upsert_product(conn, product: dict, niche: Niche) -> bool:
             "imagem": product["imagem"],
             "preco": product["preco"],
             "link": product["link"],
+            "social": product.get("social"),
         })
         return cur.rowcount > 0
 

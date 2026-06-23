@@ -46,6 +46,33 @@ def test_scrape_category_default_uma_pagina(monkeypatch):
     assert [p["id_produto"] for p in out] == ["MLB1"]
 
 
+def test_extract_social_com_e_sem_badge():
+    import json
+    from bs4 import BeautifulSoup
+    html = '''<div class="poly-card__content">
+        <span class="poly-component__highlight">MAIS VENDIDO</span>
+        <span class="poly-reviews__rating">4.9</span>
+        <span class="poly-reviews__total">(49256)</span></div>'''
+    card = BeautifulSoup(html, "html.parser").select_one("div.poly-card__content")
+    d = json.loads(scraper._extract_social(card))
+    assert d["badge"] == "MAIS VENDIDO"
+    assert d["rating"] == "4.9"
+    assert d["reviews"] == 49256
+
+    vazio = BeautifulSoup('<div class="poly-card__content"></div>',
+                          "html.parser").select_one("div.poly-card__content")
+    assert scraper._extract_social(vazio) is None
+
+
+def test_rating_from_social():
+    import json
+    assert scraper._rating_from_social(json.dumps({"rating": "4.1"})) == 4.1
+    assert scraper._rating_from_social(json.dumps({"rating": "4,9"})) == 4.9
+    assert scraper._rating_from_social(json.dumps({"rating": None})) is None
+    assert scraper._rating_from_social(None) is None
+    assert scraper.MIN_RATING == 4.2
+
+
 def test_config_scrape_max_pages():
     assert NICHE_BY_KEY["geral"].scrape_max_pages == 3
     assert NICHE_BY_KEY["carros"].scrape_max_pages == 3
