@@ -48,7 +48,8 @@ def _upsert_sql(niche: Niche):
         DO UPDATE SET "Preco" = EXCLUDED."Preco",
                       "social_proof" = EXCLUDED."social_proof"
         WHERE {t}."Status" != 'ENVIADO'
-          AND {t}."Preco" != EXCLUDED."Preco";
+          AND ({t}."Preco" != EXCLUDED."Preco"
+               OR {t}."social_proof" IS NULL);
     """).format(t=t)
 
 
