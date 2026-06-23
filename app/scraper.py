@@ -1,5 +1,6 @@
 import re
 import random
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 import requests
 from bs4 import BeautifulSoup
@@ -73,7 +74,19 @@ def extract_product_id(url: str) -> str:
 
 # ── Scraping de uma categoria ──────────────────────────────
 
-def scrape_category(url: str, log: OpLogger, min_discount: int = 30) -> list[dict]:
+def _with_page(url: str, page: int) -> str:
+    """Adiciona page=N à query preservando o fragmento; page<=1 → URL intacta."""
+    if page <= 1:
+        return url
+    parts = urlsplit(url)
+    q = dict(parse_qsl(parts.query, keep_blank_values=True))
+    q["page"] = str(page)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path,
+                       urlencode(q), parts.fragment))
+
+
+def _scrape_page(url: str, log: OpLogger, min_discount: int) -> tuple[list[dict], int]:
+    """Raspa UMA página; devolve (produtos_válidos, nº_de_cards_brutos)."""
     # ── HTTP GET ────────────────────────────────────────────
     with log.timed() as t:
         try:
@@ -82,7 +95,7 @@ def scrape_category(url: str, log: OpLogger, min_discount: int = 30) -> list[dic
         except requests.RequestException as e:
             log.error("http", f"GET {url} → FALHA: {e}", exc=e,
                       url=url)
-            return []
+            return [], 0
 
     log.info("http", f"GET {url} → {resp.status_code}",
              duration_ms=t.ms, url=url, status=resp.status_code,
@@ -145,7 +158,22 @@ def scrape_category(url: str, log: OpLogger, min_discount: int = 30) -> list[dic
              f"descartados: {sum(skipped.values())}",
              valid=len(products), **skipped)
 
-    return products
+    return products, len(names)
+
+
+def scrape_category(url: str, log: OpLogger, min_discount: int = 30,
+                    max_pages: int = 1) -> list[dict]:
+    """Raspa até max_pages páginas da categoria (&page=N), parando na primeira vazia."""
+    all_products = []
+    for page in range(1, max_pages + 1):
+        products, n_cards = _scrape_page(_with_page(url, page), log, min_discount)
+        all_products.extend(products)
+        if n_cards == 0:        # fim dos resultados → não busca além
+            break
+    if max_pages > 1:
+        log.info("paginate", f"{len(all_products)} produtos em até {max_pages} página(s)",
+                 produtos=len(all_products), max_pages=max_pages)
+    return all_products
 
 
 # ── Contador de rodadas vazias (por nicho) ─────────────────
@@ -196,7 +224,8 @@ def run_scraping(niche: Niche):
             if not url:
                 continue
 
-            products = scrape_category(url, log, niche.min_discount_pct)
+            products = scrape_category(url, log, niche.min_discount_pct,
+                                       niche.scrape_max_pages)
 
             if products:
                 cat_ok += 1

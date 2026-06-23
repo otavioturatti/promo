@@ -31,6 +31,7 @@ class Niche:
     sendflow_release_id: str
     schedules: dict  # {job_name: [ {cron kwargs}, ... ]}
     min_discount_pct: int = 30  # desconto mínimo p/ um produto entrar (descarta <= este valor)
+    scrape_max_pages: int = 1   # páginas por categoria no scraping (&page=N); para cedo se vier vazia
 
 
 NICHES = [
@@ -46,6 +47,7 @@ NICHES = [
             "retry":     [{"hour": "*/4"}],
             "whatsapp":  [{"hour": "6-22", "minute": "*/7"}],
         },
+        scrape_max_pages=3,
     ),
     Niche(
         key="carros",
@@ -64,6 +66,7 @@ NICHES = [
             ],
         },
         min_discount_pct=20,
+        scrape_max_pages=3,
     ),
 ]
 
