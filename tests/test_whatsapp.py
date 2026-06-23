@@ -35,7 +35,7 @@ def test_format_message_sem_prova_social_degrada():
     assert "De: R$500 Por: R$300 (40% OFF" in msg   # normalizado p/ padrão BR
     assert "economize R$200" in msg          # ancoragem reforçada
     assert "⭐" not in msg                     # sem prova social, sem linha
-    assert "http://aff/y" in msg
+    assert msg.rstrip().endswith("http://aff/y")   # link por último (CTA acima, 👇 aponta pra ele)
 
 
 def test_format_message_com_prova_social():

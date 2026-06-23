@@ -113,7 +113,7 @@ def format_message(product: dict) -> str:
         msg += f"{social_line}\n"
     msg += "\n"
     msg += f"De: {orig_disp} Por: {desc_disp} ({pct} OFF{economia})"
-    msg += f"\n\n{link}\n{random.choice(CTA_VARIANTS)}"
+    msg += f"\n\n{random.choice(CTA_VARIANTS)}\n{link}"   # CTA acima, 👇 aponta pro link
 
     return msg
 

@@ -154,7 +154,7 @@ def get_ready_with_null_links(niche: Niche) -> list[dict]:
 
 
 def get_ready_candidates(niche: Niche, limit: int = 20) -> list[dict]:
-    """Os N produtos PRONTO mais recentes (com link de afiliado)."""
+    """Os N produtos PRONTO mais recentes (com link), priorizando os que têm prova social."""
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
@@ -163,7 +163,7 @@ def get_ready_candidates(niche: Niche, limit: int = 20) -> list[dict]:
                     WHERE "Status" = 'PRONTO'
                       AND "Link_de_afiliado" IS NOT NULL
                       AND "Link_de_afiliado" != ''
-                    ORDER BY "created_at" DESC
+                    ORDER BY ("social_proof" IS NOT NULL) DESC, "created_at" DESC
                     LIMIT %s
                 """).format(sql.Identifier(niche.table_produtos)),
                 (limit,),
