@@ -1,3 +1,4 @@
+import time
 from contextlib import contextmanager
 
 import psycopg2
@@ -6,10 +7,33 @@ from psycopg2 import sql
 
 from app.config import DATABASE_URL, Niche
 
+# Exceções de conexão que valem reconectar (pooler do Supabase derruba conexões).
+_CONN_RETRY_EXC = (psycopg2.OperationalError, psycopg2.InterfaceError)
+
+
+def _connect(attempts: int = 3):
+    """Conecta com retry + pré-ping, resiliente a conexões derrubadas pelo pooler."""
+    last = None
+    for i in range(attempts):
+        try:
+            conn = psycopg2.connect(
+                DATABASE_URL, connect_timeout=10,
+                keepalives=1, keepalives_idle=30,
+                keepalives_interval=10, keepalives_count=3,
+            )
+            with conn.cursor() as cur:      # pré-ping: garante que a conexão está viva
+                cur.execute("SELECT 1")
+            return conn
+        except _CONN_RETRY_EXC as e:
+            last = e
+            if i < attempts - 1:
+                time.sleep(0.5 * (i + 1))
+    raise last
+
 
 @contextmanager
 def get_conn():
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = _connect()
     try:
         yield conn
         conn.commit()
