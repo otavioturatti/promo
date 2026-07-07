@@ -38,6 +38,32 @@ def test_connect_reconecta_apos_conexao_derrubada(monkeypatch):
     assert isinstance(conn, _Conn)
 
 
+def test_retry_db_reexecuta_apos_erro_de_conexao(monkeypatch):
+    monkeypatch.setattr(database.time, "sleep", lambda s: None)
+    calls = {"n": 0}
+
+    @database._retry_db
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise database.psycopg2.InterfaceError("connection already closed")
+        return "ok"
+
+    assert flaky() == "ok"
+    assert calls["n"] == 2                  # reexecutou a operação inteira
+
+
+def test_retry_db_desiste_e_propaga_apos_esgotar(monkeypatch):
+    monkeypatch.setattr(database.time, "sleep", lambda s: None)
+
+    @database._retry_db
+    def sempre_falha():
+        raise database.psycopg2.OperationalError("boom")
+
+    with pytest.raises(database.psycopg2.OperationalError):
+        sempre_falha()
+
+
 def test_get_pending_products_usa_tabela_do_nicho(monkeypatch):
     cur = FakeCursor(fetch_result=[])
     _patch_conn(monkeypatch, cur)

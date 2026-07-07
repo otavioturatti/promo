@@ -1,5 +1,6 @@
 import time
 from contextlib import contextmanager
+from functools import wraps
 
 import psycopg2
 import psycopg2.extras
@@ -9,6 +10,22 @@ from app.config import DATABASE_URL, Niche
 
 # Exceções de conexão que valem reconectar (pooler do Supabase derruba conexões).
 _CONN_RETRY_EXC = (psycopg2.OperationalError, psycopg2.InterfaceError)
+
+
+def _retry_db(fn):
+    """Reexecuta a operação com conexão nova se o pooler derrubar a conexão
+    (trata tanto 'morta no connect' quanto 'cai no meio da query')."""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        last = None
+        for i in range(3):
+            try:
+                return fn(*args, **kwargs)
+            except _CONN_RETRY_EXC as e:
+                last = e
+                time.sleep(0.5 * (i + 1))
+        raise last
+    return wrapper
 
 
 def _connect(attempts: int = 3):
@@ -46,6 +63,7 @@ def get_conn():
 
 # ── Categorias ──────────────────────────────────────────────
 
+@_retry_db
 def get_active_categories(niche: Niche) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -94,6 +112,7 @@ def upsert_product(conn, product: dict, niche: Niche) -> bool:
         return cur.rowcount > 0
 
 
+@_retry_db
 def upsert_products_batch(products: list[dict], niche: Niche) -> tuple[int, int]:
     """Insere batch. Retorna (salvos, erros)."""
     saved = 0
@@ -109,6 +128,7 @@ def upsert_products_batch(products: list[dict], niche: Niche) -> tuple[int, int]
     return saved, errors
 
 
+@_retry_db
 def update_affiliate_link(id_produto: str, link: str, niche: Niche):
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -120,6 +140,7 @@ def update_affiliate_link(id_produto: str, link: str, niche: Niche):
             )
 
 
+@_retry_db
 def mark_as_sent(id_produto: str, niche: Niche):
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -130,6 +151,7 @@ def mark_as_sent(id_produto: str, niche: Niche):
             )
 
 
+@_retry_db
 def mark_as_failed(id_produto: str, niche: Niche):
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -140,6 +162,7 @@ def mark_as_failed(id_produto: str, niche: Niche):
             )
 
 
+@_retry_db
 def count_affiliate_failures(id_produto: str, niche: Niche) -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -158,6 +181,7 @@ def count_affiliate_failures(id_produto: str, niche: Niche) -> int:
 
 # ── Produtos — Leitura ──────────────────────────────────────
 
+@_retry_db
 def get_pending_products(niche: Niche) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -169,6 +193,7 @@ def get_pending_products(niche: Niche) -> list[dict]:
             return cur.fetchall()
 
 
+@_retry_db
 def get_ready_with_null_links(niche: Niche) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -180,6 +205,7 @@ def get_ready_with_null_links(niche: Niche) -> list[dict]:
             return cur.fetchall()
 
 
+@_retry_db
 def get_ready_candidates(niche: Niche, limit: int = 40) -> list[dict]:
     """Os N produtos PRONTO mais recentes (com link), priorizando os que têm prova social."""
     with get_conn() as conn:
@@ -198,6 +224,7 @@ def get_ready_candidates(niche: Niche, limit: int = 40) -> list[dict]:
             return cur.fetchall()
 
 
+@_retry_db
 def get_recent_sent_names(niche: Niche, limit: int = 500) -> list[str]:
     """Nomes dos produtos ENVIADOS mais recentes (para deduplicação no envio)."""
     with get_conn() as conn:
@@ -216,6 +243,7 @@ def get_recent_sent_names(niche: Niche, limit: int = 500) -> list[str]:
 
 # ── Limpeza ─────────────────────────────────────────────────
 
+@_retry_db
 def cleanup_old_products(niche: Niche) -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -226,6 +254,7 @@ def cleanup_old_products(niche: Niche) -> int:
             return cur.rowcount
 
 
+@_retry_db
 def cleanup_null_links(niche: Niche) -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -239,6 +268,7 @@ def cleanup_null_links(niche: Niche) -> int:
 
 # ── Logs — Leitura (endpoint /logs) ─────────────────────────
 
+@_retry_db
 def query_logs(
     niche: Niche,
     limit: int = 50,
