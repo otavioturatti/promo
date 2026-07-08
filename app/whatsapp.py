@@ -158,8 +158,14 @@ def send_text_message(message: str, log: OpLogger, release_id: str,
 
 # ── Alerta para admin ──────────────────────────────────────
 
+# Alertas de erro no WhatsApp — desativados temporariamente (flip para True p/ reativar).
+ALERTS_ENABLED = False
+
+
 def send_alert(message: str):
     """Envia alerta para a campanha de admin via SendFlow."""
+    if not ALERTS_ENABLED:
+        return
     log = OpLogger("alert")
     headers = {
         "Authorization": f"Bearer {SENDFLOW_TOKEN}",
