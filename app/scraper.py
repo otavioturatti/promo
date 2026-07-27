@@ -36,24 +36,35 @@ def _aria_to_brl(label: str) -> str:
 
 
 def parse_price_element(price_el) -> dict | None:
-    """Extrai preço original, com desconto e % OFF de um elemento de preço."""
-    html_str = str(price_el)
+    """Extrai preço original, com desconto e % OFF de um elemento de preço.
 
-    # Busca aria-labels com "Antes:" e "Agora:"
-    antes_m = re.search(r'aria-label="(Antes:\s*\d+\s*reais[^"]*)"', html_str)
-    agora_m = re.search(r'aria-label="(Agora:\s*\d+\s*reais[^"]*)"', html_str)
-
-    if not antes_m or not agora_m:
+    HTML do ML (2026-07): preço original tem aria-label 'Antes: N reais...';
+    o preço atual está em .poly-price__current com aria-label só do valor
+    (o prefixo 'Agora:' foi removido pelo ML).
+    """
+    # Preço original (riscado): aria-label começa com "Antes:"
+    antes_el = price_el.select_one('[aria-label^="Antes:"]')
+    if not antes_el:
         return None
+    original = _aria_to_brl(antes_el.get("aria-label", ""))
 
-    original = _aria_to_brl(antes_m.group(1))
-    desconto_valor = _aria_to_brl(agora_m.group(1))
+    # Preço atual: aria-label (com "reais") dentro de .poly-price__current
+    atual_el = price_el.select_one('.poly-price__current [aria-label*="reais"]')
+    if atual_el is None:
+        # fallback: primeiro aria-label com "reais" que não seja o "Antes:"
+        for el in price_el.select('[aria-label*="reais"]'):
+            if not el.get("aria-label", "").startswith("Antes:"):
+                atual_el = el
+                break
+    if atual_el is None:
+        return None
+    desconto_valor = _aria_to_brl(atual_el.get("aria-label", ""))
 
     if not original or not desconto_valor:
         return None
 
-    # Busca porcentagem de desconto no texto (ex: "40% OFF")
-    off_m = re.search(r"(\d+)%\s*OFF", html_str)
+    # Porcentagem de desconto no texto (ex: "40% OFF")
+    off_m = re.search(r"(\d+)%\s*OFF", str(price_el))
     if not off_m:
         return None
 

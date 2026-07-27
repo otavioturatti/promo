@@ -46,6 +46,34 @@ def test_scrape_category_default_uma_pagina(monkeypatch):
     assert [p["id_produto"] for p in out] == ["MLB1"]
 
 
+def test_parse_price_element_novo_html_ml():
+    """ML (2026-07) removeu o 'Agora:'; preço atual vem em .poly-price__current."""
+    from bs4 import BeautifulSoup
+    html = '''<div class="poly-component__price">
+      <div class="poly-price__labels">
+        <span class="polylabel-pill">56% OFF</span>
+        <s aria-label="Antes: 1855 reais">R$1.855</s>
+      </div>
+      <div class="poly-price__current">
+        <span aria-label="806 reais com 65 centavos">R$806,65</span>
+      </div>
+    </div>'''
+    el = BeautifulSoup(html, "html.parser").select_one("div.poly-component__price")
+    p = scraper.parse_price_element(el)
+    assert p is not None
+    assert p["desconto_pct"] == 56
+    assert "1.855" in p["original"]
+    assert "806" in p["desconto_valor"]
+
+
+def test_parse_price_element_sem_desconto_retorna_none():
+    from bs4 import BeautifulSoup
+    html = '<div class="poly-component__price"><div class="poly-price__current">' \
+           '<span aria-label="99 reais">R$99</span></div></div>'
+    el = BeautifulSoup(html, "html.parser").select_one("div.poly-component__price")
+    assert scraper.parse_price_element(el) is None      # sem "Antes:" (sem desconto)
+
+
 def test_extract_social_com_e_sem_badge():
     import json
     from bs4 import BeautifulSoup
