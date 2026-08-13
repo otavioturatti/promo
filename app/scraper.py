@@ -270,11 +270,13 @@ def run_scraping(niche: Niche):
 
     log.info("categories", f"{len(categories)} categorias ativas", count=len(categories))
 
-    # ── Scraping por categoria ─────────────────────────────
-    all_products = []
+    # ── Scraping por categoria (salva a cada categoria: memória baixa + durável) ──
     seen_ids = set()
     cat_ok = 0
     cat_fail = 0
+    total_unique = 0
+    total_saved = 0
+    total_errors = 0
 
     with log.timed() as t_total:
         for cat in categories:
@@ -290,17 +292,33 @@ def run_scraping(niche: Niche):
             else:
                 cat_fail += 1
 
+            # dedup entre categorias + tag da categoria de origem
+            frescos = []
             for p in products:
                 if p["id_produto"] not in seen_ids:
                     seen_ids.add(p["id_produto"])
                     p["categoria"] = cat.get("categoria") or cat.get("Categoria")
-                    all_products.append(p)
+                    frescos.append(p)
 
-    log.info("deduplicate", f"{len(all_products)} produtos únicos de {len(seen_ids)} IDs",
-             unique=len(all_products), categories_ok=cat_ok, categories_fail=cat_fail)
+            if not frescos:
+                continue
 
-    # ── Salvar no banco ────────────────────────────────────
-    if not all_products:
+            # Salva JÁ os produtos desta categoria (não acumula tudo na memória;
+            # se o processo morrer no meio, o que já salvou persiste).
+            total_unique += len(frescos)
+            random.shuffle(frescos)
+            try:
+                saved, errors = upsert_products_batch(frescos, niche)
+                total_saved += saved
+                total_errors += errors
+            except Exception as e:
+                log.error("save", f"Falha ao salvar categoria [{cat.get('categoria')}]: {e}",
+                          exc=e)
+
+    log.info("deduplicate", f"{total_unique} produtos únicos",
+             unique=total_unique, categories_ok=cat_ok, categories_fail=cat_fail)
+
+    if total_unique == 0:
         log.warning("save", "Nenhum produto para salvar")
         empty = _register_empty_round(niche.key)
         log.warning("monitor", f"Rodadas consecutivas sem produtos: {empty}/{_ALERT_AFTER}",
@@ -314,16 +332,11 @@ def run_scraping(niche: Niche):
 
     _register_success(niche.key)
 
-    random.shuffle(all_products)
+    log.info("save", f"{total_saved} salvos, {total_errors} erros",
+             saved=total_saved, errors=total_errors)
 
-    with log.timed() as t_save:
-        saved, errors = upsert_products_batch(all_products, niche)
-
-    log.info("save", f"{saved} salvos, {errors} erros",
-             duration_ms=t_save.ms, saved=saved, errors=errors)
-
-    log.info("done", f"Scraping finalizado: {saved} produtos salvos",
-             duration_ms=t_total.ms, total_products=saved, categories=len(categories))
+    log.info("done", f"Scraping finalizado: {total_saved} produtos salvos",
+             duration_ms=t_total.ms, total_products=total_saved, categories=len(categories))
 
 
 def _check_alert(log: OpLogger, niche: Niche, message: str):
